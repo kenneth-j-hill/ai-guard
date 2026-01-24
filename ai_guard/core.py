@@ -128,9 +128,43 @@ class GuardFile:
                 self.entries.append(entry)
 
     def save(self) -> None:
-        """Save entries to the .ai-guard file."""
+        """Save entries to the .ai-guard file.
+
+        Automatically adds self-protection for the .ai-guard file itself.
+        This prevents rogue modifications to the protection list.
+        """
+        # Ensure .ai-guard protects itself
+        self._ensure_self_protection()
+
+        # Build content excluding self-protection line for hash computation
+        other_entries = [e for e in self.entries if not (e.path == ".ai-guard" and e.identifier is None)]
+        other_lines = [entry.to_line() for entry in other_entries]
+        content_to_hash = "\n".join(other_lines) + "\n" if other_lines else ""
+
+        # Compute hash of the protected entries (excluding self-protection)
+        self_hash = compute_hash(content_to_hash)
+
+        # Update the self-protection entry with the computed hash
+        for i, entry in enumerate(self.entries):
+            if entry.path == ".ai-guard" and entry.identifier is None:
+                self.entries[i] = ProtectedEntry(
+                    path=".ai-guard", identifier=None, hash=self_hash
+                )
+                break
+
+        # Write the complete file
         lines = [entry.to_line() for entry in self.entries]
         self.filepath.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def _ensure_self_protection(self) -> None:
+        """Ensure .ai-guard file is in the protection list."""
+        for entry in self.entries:
+            if entry.path == ".ai-guard" and entry.identifier is None:
+                return
+
+        # Add self-protection entry with placeholder hash (will be computed in save())
+        entry = ProtectedEntry(path=".ai-guard", identifier=None, hash="0" * 16)
+        self.entries.insert(0, entry)  # Put it first
 
     def add_file(self, path: str) -> ProtectedEntry:
         """Add whole-file protection.
@@ -265,12 +299,38 @@ class GuardFile:
                     failures.append((entry, "identifier not found"))
                 elif current_hash != entry.hash:
                     failures.append((entry, "hash mismatch"))
+            elif entry.path == ".ai-guard":
+                # Self-protection: hash is of entries excluding the self-protection line
+                current_hash = self._compute_self_protection_hash()
+                if current_hash != entry.hash:
+                    failures.append((entry, "hash mismatch"))
             else:
                 current_hash = compute_file_hash(filepath)
                 if current_hash != entry.hash:
                     failures.append((entry, "hash mismatch"))
 
         return failures
+
+    def _compute_self_protection_hash(self) -> str:
+        """Compute the hash for self-protection verification.
+
+        The hash is computed over all entries except the self-protection entry,
+        based on the actual file on disk (not in-memory entries).
+        """
+        if not self.filepath.exists():
+            return ""
+
+        # Read entries from disk
+        disk_entries = []
+        for line in self.filepath.read_text(encoding="utf-8").splitlines():
+            entry = ProtectedEntry.from_line(line)
+            if entry:
+                disk_entries.append(entry)
+
+        other_entries = [e for e in disk_entries if not (e.path == ".ai-guard" and e.identifier is None)]
+        other_lines = [entry.to_line() for entry in other_entries]
+        content_to_hash = "\n".join(other_lines) + "\n" if other_lines else ""
+        return compute_hash(content_to_hash)
 
     def list_entries(self) -> list[ProtectedEntry]:
         """List all protected entries.

@@ -72,8 +72,12 @@ def func_ab():
         content = (temp_project / ".ai-guard").read_text()
         lines = [l for l in content.strip().split("\n") if l]
 
-        assert len(lines) == 3
-        assert all("test_invariant_" in line for line in lines)
+        # 4 lines: 1 self-protection + 3 test_invariant_* entries
+        assert len(lines) == 4
+        # First line is self-protection
+        assert lines[0].startswith(".ai-guard:")
+        # Remaining lines are the test_invariant entries
+        assert all("test_invariant_" in line for line in lines[1:])
 
     def test_wildcard_verify_detects_single_change(self, temp_project, sample_python_file):
         """Verification detects when just one of the wildcard matches changed."""

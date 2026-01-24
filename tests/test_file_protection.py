@@ -39,8 +39,10 @@ class TestWholeFileProtection:
         guard2 = GuardFile(temp_project)
         entries = guard2.list_entries()
 
-        assert len(entries) == 1
-        assert entries[0].path == "config.py"
+        # 2 entries: self-protection + config.py
+        assert len(entries) == 2
+        assert entries[0].path == ".ai-guard"  # Self-protection is first
+        assert entries[1].path == "config.py"
 
     def test_verify_unchanged_file_passes(self, temp_project):
         """Verification passes when a protected file hasn't changed."""
@@ -130,3 +132,81 @@ class TestWholeFileProtection:
         entry = guard.add_file("subdir\\config.py")
 
         assert entry.path == "subdir/config.py"
+
+
+class TestSelfProtection:
+    """Tests for automatic self-protection of the .ai-guard file."""
+
+    def test_ai_guard_protects_itself(self, temp_project):
+        """The .ai-guard file automatically includes self-protection."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        guard = GuardFile(temp_project)
+        guard.add_file("config.py")
+        guard.save()
+
+        # Check that .ai-guard entry exists and is first
+        entries = guard.list_entries()
+        assert entries[0].path == ".ai-guard"
+        assert entries[0].identifier is None
+
+    def test_self_protection_verification_passes(self, temp_project):
+        """Self-protection verification passes for unmodified .ai-guard."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        guard = GuardFile(temp_project)
+        guard.add_file("config.py")
+        guard.save()
+
+        failures = guard.verify()
+        assert len(failures) == 0
+
+    def test_self_protection_detects_tampering(self, temp_project):
+        """Self-protection detects when .ai-guard file is tampered with."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        guard = GuardFile(temp_project)
+        guard.add_file("config.py")
+        guard.save()
+
+        # Tamper with the .ai-guard file by removing an entry
+        ai_guard_path = temp_project / ".ai-guard"
+        content = ai_guard_path.read_text()
+        # Remove the config.py line
+        lines = [l for l in content.splitlines() if "config.py" not in l]
+        ai_guard_path.write_text("\n".join(lines) + "\n")
+
+        # Reload and verify - should detect tampering
+        guard2 = GuardFile(temp_project)
+        failures = guard2.verify()
+
+        # Should have a failure for .ai-guard hash mismatch
+        assert len(failures) == 1
+        assert failures[0][0].path == ".ai-guard"
+        assert failures[0][1] == "hash mismatch"
+
+    def test_self_protection_detects_added_entry(self, temp_project):
+        """Self-protection detects when entries are added to .ai-guard."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        guard = GuardFile(temp_project)
+        guard.add_file("config.py")
+        guard.save()
+
+        # Tamper by adding a fake entry
+        ai_guard_path = temp_project / ".ai-guard"
+        content = ai_guard_path.read_text()
+        content += "fake/file.py:0000000000000000\n"
+        ai_guard_path.write_text(content)
+
+        # Reload and verify
+        guard2 = GuardFile(temp_project)
+        failures = guard2.verify()
+
+        # Should detect tampering (hash mismatch) and fake file not found
+        paths = [f[0].path for f in failures]
+        assert ".ai-guard" in paths
