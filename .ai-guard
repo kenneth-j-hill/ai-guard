@@ -1,0 +1,5 @@
+tests/test_file_protection.py:TestWholeFileProtection:0cd0765e35508fe9
+tests/test_identifier_protection.py:TestIdentifierProtection:22d819a6e29a3898
+tests/test_wildcards.py:TestWildcardPatterns:9339bf195ae68034
+tests/test_hook.py:TestHookBehavior:1fe1c736a40c7a32
+tests/test_integration.py:TestPreCommitHookIntegration:b2c4948b8a539901
