@@ -47,7 +47,7 @@ def parse_target(target: str) -> tuple[str, Optional[str]]:
     # after the file extension
     if ":" in target:
         # Find the .py (or similar) extension and split after it
-        for ext in [".py", ".pyw", ".js", ".ts", ".cpp", ".c", ".h", ".hpp"]:
+        for ext in [".py", ".pyw", ".js", ".ts", ".cpp", ".c", ".h", ".hpp", ".cc", ".cxx", ".hxx"]:
             if ext + ":" in target:
                 idx = target.index(ext + ":") + len(ext)
                 path = target[:idx]
@@ -56,30 +56,73 @@ def parse_target(target: str) -> tuple[str, Optional[str]]:
     return target, None
 
 
+def expand_glob_target(root: Path, target: str) -> list[tuple[str, Optional[str]]]:
+    """Expand a target with glob patterns in the path.
+
+    Args:
+        root: Project root directory.
+        target: Target like 'tests/*.py:func' or 'src/**/*.py'
+
+    Returns:
+        List of (path, identifier) tuples for each matching file.
+    """
+    import glob
+
+    path, identifier = parse_target(target)
+
+    # Check if path contains glob characters
+    if "*" not in path and "?" not in path:
+        return [(path, identifier)]
+
+    # Expand the glob relative to root
+    full_pattern = str(root / path)
+    matches = glob.glob(full_pattern, recursive=True)
+
+    if not matches:
+        return [(path, identifier)]  # Return as-is, will error later
+
+    # Convert back to relative paths
+    results = []
+    for match in sorted(matches):
+        rel_path = str(Path(match).relative_to(root))
+        # Normalize to forward slashes
+        rel_path = rel_path.replace("\\", "/")
+        results.append((rel_path, identifier))
+
+    return results
+
+
 def cmd_add(args: argparse.Namespace) -> int:
     """Add protection for a file or identifier."""
     root = find_project_root()
     guard = GuardFile(root)
 
-    path, identifier = parse_target(args.target)
+    targets = expand_glob_target(root, args.target)
+    any_success = False
+    any_error = False
 
-    try:
-        if identifier:
-            entries = guard.add_identifier(path, identifier)
-            for entry in entries:
-                print(f"Protected {entry.path}:{entry.identifier} ({entry.hash})")
-        else:
-            entry = guard.add_file(path)
-            print(f"Protected {entry.path} ({entry.hash})")
+    for path, identifier in targets:
+        try:
+            if identifier:
+                entries = guard.add_identifier(path, identifier)
+                for entry in entries:
+                    print(f"Protected {entry.path}:{entry.identifier} ({entry.hash})")
+                    any_success = True
+            else:
+                entry = guard.add_file(path)
+                print(f"Protected {entry.path} ({entry.hash})")
+                any_success = True
+        except FileNotFoundError:
+            print(f"Error: File not found: {path}", file=sys.stderr)
+            any_error = True
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            any_error = True
 
+    if any_success:
         guard.save()
-        return 0
-    except FileNotFoundError:
-        print(f"Error: File not found: {path}", file=sys.stderr)
-        return 1
-    except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
+
+    return 1 if any_error and not any_success else 0
 
 
 def cmd_update(args: argparse.Namespace) -> int:
@@ -87,24 +130,30 @@ def cmd_update(args: argparse.Namespace) -> int:
     root = find_project_root()
     guard = GuardFile(root)
 
-    path, identifier = parse_target(args.target)
+    targets = expand_glob_target(root, args.target)
+    any_success = False
+    any_error = False
 
-    try:
-        entries = guard.update(path, identifier)
-        for entry in entries:
-            if entry.identifier:
-                print(f"Updated {entry.path}:{entry.identifier} ({entry.hash})")
-            else:
-                print(f"Updated {entry.path} ({entry.hash})")
+    for path, identifier in targets:
+        try:
+            entries = guard.update(path, identifier)
+            for entry in entries:
+                if entry.identifier:
+                    print(f"Updated {entry.path}:{entry.identifier} ({entry.hash})")
+                else:
+                    print(f"Updated {entry.path} ({entry.hash})")
+                any_success = True
+        except FileNotFoundError:
+            print(f"Error: File not found: {path}", file=sys.stderr)
+            any_error = True
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            any_error = True
 
+    if any_success:
         guard.save()
-        return 0
-    except FileNotFoundError:
-        print(f"Error: File not found: {path}", file=sys.stderr)
-        return 1
-    except ValueError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        return 1
+
+    return 1 if any_error and not any_success else 0
 
 
 def cmd_remove(args: argparse.Namespace) -> int:
@@ -213,6 +262,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="ai-guard",
         description="Protect code from incidental modifications by an AI",
+        epilog="Run 'ai-guard <command> --help' for help on a specific command.",
     )
     parser.add_argument(
         "--version",
@@ -228,7 +278,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     add_parser.add_argument(
         "target",
-        help="File path or path:identifier to protect (supports wildcards for identifiers)",
+        help='File or path:identifier to protect. Supports globs: "src/*.py:func_*" (quote to prevent shell expansion)',
     )
     add_parser.set_defaults(func=cmd_add)
 
@@ -238,7 +288,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     update_parser.add_argument(
         "target",
-        help="File path or path:identifier to update",
+        help='File or path:identifier to update. Supports globs: "src/*.py:func_*"',
     )
     update_parser.set_defaults(func=cmd_update)
 
