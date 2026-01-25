@@ -247,7 +247,11 @@ pytest tests/test_file_protection.py -v
 
 ## License
 
-MIT
+Apache 2.0 - See [LICENSE](LICENSE) for details.
+
+## Trademark
+
+"ai-guard" is a trademark. Derivative works may not use the name "ai-guard" or imply endorsement without permission. Attribution to the original project is required per the Apache 2.0 license.
 
 ## Contributing
 
