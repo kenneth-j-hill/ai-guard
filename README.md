@@ -33,16 +33,22 @@ THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. ai-guard is a d
 
 ## Installation
 
+Install from GitHub:
+
 ```bash
-pip install ai-guard
+pip install git+https://github.com/kenneth-j-hill/ai-guard.git
 ```
 
-Ensure the install location is in your PATH. Common approaches:
+Or with pipx (recommended - isolated environment, automatically adds to PATH):
 
-- **pipx** (recommended): `pipx install ai-guard` - installs in isolated environment, automatically adds to PATH
-- **User install**: `pip install --user ai-guard` - installs to `~/.local/bin` (add to PATH if needed)
-- **Virtual environment**: activate the venv before running ai-guard commands
-- **System install**: `sudo pip install ai-guard` - not recommended, but works
+```bash
+pipx install git+https://github.com/kenneth-j-hill/ai-guard.git
+```
+
+Other options:
+
+- **User install**: `pip install --user git+https://github.com/kenneth-j-hill/ai-guard.git`
+- **Virtual environment**: activate the venv first, then pip install
 
 Verify installation:
 
@@ -53,7 +59,7 @@ ai-guard --version
 For development:
 
 ```bash
-git clone https://github.com/your-username/ai-guard.git
+git clone https://github.com/kenneth-j-hill/ai-guard.git
 cd ai-guard
 pip install -e ".[dev]"
 ```
