@@ -1,6 +1,5 @@
-.ai-guard:746ab609f594118a
+.ai-guard:149fdd9f19db3f03
 tests/test_cli.py:TestParseTarget:3a38ea38f3efb471
-tests/test_cli.py:TestAddCommand:3c1bb81157437162
 tests/test_cli.py:TestVerifyCommand:00efa4b26f55eb81
 tests/test_cli.py:TestUpdateCommand:cb22ac9d69ec7981
 tests/test_cli.py:TestRemoveCommand:f6c60ef5a3c29574
@@ -27,3 +26,4 @@ tests/test_parser_interface.py:TestParserRegistry:7562056ace0e5575
 tests/test_parser_interface.py:TestPythonParser:97fc05aa8dc57288
 tests/test_parser_interface.py:TestAddingNewLanguageSupport:684921c2af2d2d87
 tests/test_wildcards.py:TestWildcardPatterns:731e12da8911e75a
+tests/test_cli.py:TestAddCommand:35b51df896a51653

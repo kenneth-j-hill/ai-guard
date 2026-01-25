@@ -97,27 +97,27 @@ def cmd_add(args: argparse.Namespace) -> int:
     root = find_project_root()
     guard = GuardFile(root)
 
-    targets = expand_glob_target(root, args.target)
     any_success = False
     any_error = False
 
-    for path, identifier in targets:
-        try:
-            if identifier:
-                entries = guard.add_identifier(path, identifier)
-                for entry in entries:
-                    print(f"Protected {entry.path}:{entry.identifier} ({entry.hash})")
+    for target in args.targets:
+        for path, identifier in expand_glob_target(root, target):
+            try:
+                if identifier:
+                    entries = guard.add_identifier(path, identifier)
+                    for entry in entries:
+                        print(f"Protected {entry.path}:{entry.identifier} ({entry.hash})")
+                        any_success = True
+                else:
+                    entry = guard.add_file(path)
+                    print(f"Protected {entry.path} ({entry.hash})")
                     any_success = True
-            else:
-                entry = guard.add_file(path)
-                print(f"Protected {entry.path} ({entry.hash})")
-                any_success = True
-        except FileNotFoundError:
-            print(f"Error: File not found: {path}", file=sys.stderr)
-            any_error = True
-        except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            any_error = True
+            except FileNotFoundError:
+                print(f"Error: File not found: {path}", file=sys.stderr)
+                any_error = True
+            except ValueError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                any_error = True
 
     if any_success:
         guard.save()
@@ -130,25 +130,25 @@ def cmd_update(args: argparse.Namespace) -> int:
     root = find_project_root()
     guard = GuardFile(root)
 
-    targets = expand_glob_target(root, args.target)
     any_success = False
     any_error = False
 
-    for path, identifier in targets:
-        try:
-            entries = guard.update(path, identifier)
-            for entry in entries:
-                if entry.identifier:
-                    print(f"Updated {entry.path}:{entry.identifier} ({entry.hash})")
-                else:
-                    print(f"Updated {entry.path} ({entry.hash})")
-                any_success = True
-        except FileNotFoundError:
-            print(f"Error: File not found: {path}", file=sys.stderr)
-            any_error = True
-        except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            any_error = True
+    for target in args.targets:
+        for path, identifier in expand_glob_target(root, target):
+            try:
+                entries = guard.update(path, identifier)
+                for entry in entries:
+                    if entry.identifier:
+                        print(f"Updated {entry.path}:{entry.identifier} ({entry.hash})")
+                    else:
+                        print(f"Updated {entry.path} ({entry.hash})")
+                    any_success = True
+            except FileNotFoundError:
+                print(f"Error: File not found: {path}", file=sys.stderr)
+                any_error = True
+            except ValueError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                any_error = True
 
     if any_success:
         guard.save()
@@ -161,12 +161,15 @@ def cmd_remove(args: argparse.Namespace) -> int:
     root = find_project_root()
     guard = GuardFile(root)
 
-    path, identifier = parse_target(args.target)
-    count = guard.remove(path, identifier)
+    total_count = 0
+    for target in args.targets:
+        for path, identifier in expand_glob_target(root, target):
+            count = guard.remove(path, identifier)
+            total_count += count
 
-    if count > 0:
+    if total_count > 0:
         guard.save()
-        print(f"Removed {count} protection(s)")
+        print(f"Removed {total_count} protection(s)")
         return 0
     else:
         print("No matching protections found", file=sys.stderr)
@@ -277,7 +280,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         "add", help="Add protection for a file or identifier"
     )
     add_parser.add_argument(
-        "target",
+        "targets",
+        nargs="+",
+        metavar="target",
         help='File or path:identifier to protect. Supports globs: "src/*.py:func_*" (quote to prevent shell expansion)',
     )
     add_parser.set_defaults(func=cmd_add)
@@ -287,7 +292,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         "update", help="Update the hash for a protected entry"
     )
     update_parser.add_argument(
-        "target",
+        "targets",
+        nargs="+",
+        metavar="target",
         help='File or path:identifier to update. Supports globs: "src/*.py:func_*"',
     )
     update_parser.set_defaults(func=cmd_update)
@@ -297,7 +304,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         "remove", help="Remove protection for a file or identifier"
     )
     remove_parser.add_argument(
-        "target",
+        "targets",
+        nargs="+",
+        metavar="target",
         help="File path or path:identifier to unprotect",
     )
     remove_parser.set_defaults(func=cmd_remove)

@@ -92,6 +92,51 @@ class TestAddCommand:
 
         assert result == 1
 
+    def test_add_multiple_targets(self, temp_project, monkeypatch):
+        """'ai-guard add file1.py file2.py' protects multiple files."""
+        file1 = temp_project / "config.py"
+        file1.write_text("SECRET = 42\n", encoding="utf-8")
+        file2 = temp_project / "settings.py"
+        file2.write_text("DEBUG = True\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        result = main(["add", "config.py", "settings.py"])
+
+        assert result == 0
+        content = (temp_project / ".ai-guard").read_text()
+        assert "config.py" in content
+        assert "settings.py" in content
+
+    def test_add_glob_pattern(self, temp_project, monkeypatch):
+        """'ai-guard add *.py' expands glob and protects matching files."""
+        file1 = temp_project / "config.py"
+        file1.write_text("SECRET = 42\n", encoding="utf-8")
+        file2 = temp_project / "settings.py"
+        file2.write_text("DEBUG = True\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        result = main(["add", "*.py"])
+
+        assert result == 0
+        content = (temp_project / ".ai-guard").read_text()
+        assert "config.py" in content
+        assert "settings.py" in content
+
+    def test_add_glob_with_identifier(self, temp_project, monkeypatch):
+        """'ai-guard add *.py:func' protects identifier in all matching files."""
+        file1 = temp_project / "module1.py"
+        file1.write_text("def helper():\n    pass\n", encoding="utf-8")
+        file2 = temp_project / "module2.py"
+        file2.write_text("def helper():\n    return 1\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        result = main(["add", "*.py:helper"])
+
+        assert result == 0
+        content = (temp_project / ".ai-guard").read_text()
+        assert "module1.py:helper" in content
+        assert "module2.py:helper" in content
+
 
 class TestVerifyCommand:
     """Tests for the 'verify' command."""

@@ -70,6 +70,12 @@ ai-guard add src/billing.py:calculate_tax
 # Protect multiple functions with a wildcard
 ai-guard add tests/test_core.py:test_invariant_*
 
+# Protect multiple targets at once
+ai-guard add src/auth.py src/billing.py:calculate_tax
+
+# Use glob patterns (quote to prevent shell expansion)
+ai-guard add "src/*.py" "tests/*.py:test_*"
+
 # Install the git pre-commit hook
 ai-guard install-hook
 ```
@@ -87,9 +93,9 @@ If this change is intentional, run 'ai-guard update <path>' first.
 
 ## Commands
 
-### `ai-guard add <target>`
+### `ai-guard add <target> [target ...]`
 
-Add protection for a file or identifier.
+Add protection for files or identifiers. Accepts multiple targets and glob patterns.
 
 ```bash
 # Whole file
@@ -98,22 +104,29 @@ ai-guard add path/to/file.py
 # Specific identifier (function, class, variable)
 ai-guard add path/to/file.py:my_function
 
-# Wildcard pattern
+# Wildcard pattern for identifiers
 ai-guard add path/to/file.py:test_*
+
+# Multiple targets
+ai-guard add file1.py file2.py:func
+
+# Glob patterns (quote to prevent shell expansion)
+ai-guard add "src/*.py" "tests/*.py:Test*"
 ```
 
-### `ai-guard update <target>`
+### `ai-guard update <target> [target ...]`
 
-Update the hash after intentionally modifying protected code.
+Update the hash after intentionally modifying protected code. Accepts multiple targets and glob patterns.
 
 ```bash
 ai-guard update path/to/file.py
 ai-guard update path/to/file.py:my_function
+ai-guard update "src/*.py"
 ```
 
-### `ai-guard remove <target>`
+### `ai-guard remove <target> [target ...]`
 
-Remove protection.
+Remove protection. Accepts multiple targets and glob patterns.
 
 ```bash
 ai-guard remove path/to/file.py
