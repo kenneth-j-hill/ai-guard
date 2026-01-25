@@ -174,7 +174,7 @@ This means changing any of these will trigger a protection violation.
 
 ## Hardening Protection
 
-The `.ai-guard` file automatically protects itself - any tampering will be detected during verification.
+The pre-commit hook alone only catches incidental modifications. An AI with commit permissions that sees the hook failure message could follow its instructions to run `ai-guard update` and recommit. For effective protection, you must also block the bypass commands.
 
 ### Install ai-guard outside the working tree
 
@@ -187,9 +187,13 @@ pipx install ai-guard             # Isolated install
 
 Avoid installing in editable mode (`pip install -e .`) within the project, as the AI could modify the source.
 
-### Claude Code
+### Block bypass commands
 
-For Claude Code users, add to `.claude/settings.json`:
+The critical step is preventing the AI from running `ai-guard update` or `ai-guard remove`. Without this, the pre-commit hook is only a speed bump.
+
+#### Claude Code
+
+Add to `.claude/settings.json`:
 
 ```json
 {
@@ -204,12 +208,14 @@ For Claude Code users, add to `.claude/settings.json`:
 }
 ```
 
-This blocks Claude from:
-- Running `ai-guard update` to change hashes
-- Running `ai-guard remove` to remove protection
-- Directly editing the `.ai-guard` file
+#### Other AI tools
 
-With these settings, only humans can modify protection, and the pre-commit hook ensures protected code can't be committed without updating hashes first.
+Configure your AI tool to deny commands matching:
+- `ai-guard update`
+- `ai-guard remove`
+- Direct writes to `.ai-guard`
+
+With bypass commands blocked, the AI cannot resolve protection violations, and the commit will fail. A human must review the change and explicitly run `ai-guard update` to approve it.
 
 ## Supported Languages
 
