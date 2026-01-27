@@ -1,10 +1,10 @@
-# ai-guard
+# AI-Guard
 
 Protect code from incidental modifications by an AI.
 
 ## Overview
 
-When working with AI coding assistants, certain code should never be modified without explicit human approval - security-critical functions, tested invariants, configuration that must stay stable. ai-guard lets you mark this code as protected and enforces it through git hooks.
+When working with AI coding assistants, certain code should never be modified without explicit human approval - security-critical functions, tested invariants, configuration that must stay stable. AI-Guard lets you mark this code as protected and enforces it through git hooks.
 
 ### Goals
 
@@ -20,7 +20,7 @@ When working with AI coding assistants, certain code should never be modified wi
 
 ### Disclaimer
 
-THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. ai-guard is a development tool designed to reduce accidental modifications, not a security product. It can be bypassed and should not be relied upon as your only safeguard. Always use proper code review, version control, backups, and security practices. The authors are not liable for any damages arising from the use of this software or from modifications to code that was intended to be protected. See the LICENSE file for full terms.
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. AI-Guard is a development tool designed to reduce accidental modifications, not a security product. It can be bypassed and should not be relied upon as your only safeguard. Always use proper code review, version control, backups, and security practices. The authors are not liable for any damages arising from the use of this software or from modifications to code that was intended to be protected. See the LICENSE file for full terms.
 
 ## Features
 
@@ -90,7 +90,7 @@ Now if anyone (human or AI) tries to commit changes to protected code, the commi
 
 ```
 $ git commit -m "Quick fix"
-Protection violations found:
+AI-Guard violations found:
   src/auth.py - hash mismatch
 
 Commit blocked: Protected code was modified.
@@ -182,9 +182,9 @@ This means changing any of these will trigger a protection violation.
 
 The pre-commit hook alone only catches incidental modifications. An AI with commit permissions that sees the hook failure message could follow its instructions to run `ai-guard update` and recommit. For effective protection, you must also block the bypass commands.
 
-### Install ai-guard outside the working tree
+### Install AI-Guard outside the working tree
 
-Install ai-guard in a location the AI cannot modify, such as your home directory or system site-packages:
+Install AI-Guard in a location the AI cannot modify, such as your home directory or system site-packages:
 
 ```bash
 pip install ai-guard              # System/user install
@@ -230,7 +230,7 @@ With bypass commands blocked, the AI cannot resolve protection violations, and t
 
 ## Adding Language Support
 
-ai-guard has a pluggable parser system.
+AI-Guard has a pluggable parser system.
 
 To add support for another language, create a parser that implements the `Parser` interface:
 
@@ -276,7 +276,7 @@ Apache 2.0 - See [LICENSE](LICENSE) for details.
 
 ## Trademark
 
-"ai-guard" is a trademark. Derivative works may not use the name "ai-guard" or imply endorsement without permission. Attribution to the original project is required per the Apache 2.0 license.
+"AI-Guard" is a trademark. Derivative works may not use the name "AI-Guard" or imply endorsement without permission. Attribution to the original project is required per the Apache 2.0 license.
 
 ## Contributing
 

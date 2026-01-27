@@ -206,7 +206,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
         print("All protected code verified successfully")
         return 0
 
-    print("Protection violations found:", file=sys.stderr)
+    print("AI-Guard violations found:", file=sys.stderr)
     for entry, reason in failures:
         if entry.identifier:
             print(f"  {entry.path}:{entry.identifier} - {reason}", file=sys.stderr)

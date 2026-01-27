@@ -10,6 +10,50 @@ from pathlib import Path
 from ai_guard.core import compute_hash, compute_file_hash, compute_identifier_hash
 
 
+class TestLineEndingNormalization:
+    """Tests for line ending normalization in hash computation.
+
+    The hash normalization strips all CR characters, so:
+    - CRLF (\\r\\n) becomes LF (\\n) - the main Windows vs Unix case
+    - CR-only (\\r) becomes empty - rare old Mac format
+    """
+
+    def test_crlf_and_lf_produce_same_hash(self):
+        """CRLF (Windows) and LF (Unix) line endings produce the same hash.
+
+        This is the primary cross-platform case: files checked out on Windows
+        with CRLF line endings should hash the same as on Unix with LF.
+        """
+        content_lf = "line1\nline2\nline3\n"
+        content_crlf = "line1\r\nline2\r\nline3\r\n"
+
+        hash_lf = compute_hash(content_lf)
+        hash_crlf = compute_hash(content_crlf)
+
+        assert hash_lf == hash_crlf
+
+    def test_file_with_mixed_crlf_and_lf(self):
+        """Files with inconsistent line endings (some CRLF, some LF) normalize correctly."""
+        content_lf = "line1\nline2\nline3\n"
+        content_mixed = "line1\r\nline2\nline3\r\n"
+
+        hash_lf = compute_hash(content_lf)
+        hash_mixed = compute_hash(content_mixed)
+
+        assert hash_lf == hash_mixed
+
+    def test_trailing_cr_stripped(self):
+        """Trailing CR at end of file is stripped."""
+        content_clean = "content\n"
+        content_with_cr = "content\n\r"
+
+        # After stripping \r, both become "content\n"
+        hash_clean = compute_hash(content_clean)
+        hash_with_cr = compute_hash(content_with_cr)
+
+        assert hash_clean == hash_with_cr
+
+
 class TestFileHashing:
     """Tests for whole-file hash computation."""
 

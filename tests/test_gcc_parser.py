@@ -3,9 +3,15 @@
 These tests document the behavior of C and C++ parsing using the GCC toolchain.
 """
 
+import shutil
+
 import pytest
 
 from ai_guard.parsers.gcc import GCCParser, GPPParser
+
+
+# Check if GCC is available on this system
+GCC_AVAILABLE = shutil.which("gcc") is not None
 from ai_guard.parsers.base import get_parser_for_file
 
 
@@ -428,6 +434,7 @@ void print_json(void) {
 
         assert identifiers == []
 
+    @pytest.mark.skipif(not GCC_AVAILABLE, reason="GCC not installed")
     def test_syntax_check_valid_code(self):
         """Syntax check passes for valid C code."""
         source = '''
@@ -438,6 +445,7 @@ int main(void) {
         parser = GCCParser()
         assert parser.check_syntax(source) is True
 
+    @pytest.mark.skipif(not GCC_AVAILABLE, reason="GCC not installed")
     def test_syntax_check_invalid_code(self):
         """Syntax check fails for invalid C code."""
         source = '''

@@ -3,11 +3,15 @@
 These tests document the hook installation and behavior.
 """
 
-import pytest
-from pathlib import Path
+import sys
 import stat
 
+import pytest
+
 from ai_guard.cli import main
+
+
+IS_WINDOWS = sys.platform == "win32"
 
 
 class TestHookInstallation:
@@ -22,6 +26,7 @@ class TestHookInstallation:
         hook_path = temp_project / ".git" / "hooks" / "pre-commit"
         assert hook_path.exists()
 
+    @pytest.mark.skipif(IS_WINDOWS, reason="Windows does not use Unix file permissions")
     def test_hook_is_executable(self, temp_project, monkeypatch):
         """The installed hook has executable permissions."""
         monkeypatch.chdir(temp_project)

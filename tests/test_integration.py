@@ -4,6 +4,7 @@ These tests verify that the hook actually blocks commits when protected
 code is modified, and allows commits when it's restored.
 """
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,10 @@ from pathlib import Path
 import pytest
 
 from ai_guard.cli import main
+
+
+# Check if ai-guard CLI is available in PATH (required for shell script tests)
+AI_GUARD_IN_PATH = shutil.which("ai-guard") is not None
 
 
 class TestPreCommitHookIntegration:
@@ -61,6 +66,7 @@ class TestPreCommitHookIntegration:
         assert result.returncode == 0
         assert "verified successfully" in result.stdout
 
+    @pytest.mark.skipif(not AI_GUARD_IN_PATH, reason="ai-guard CLI must be installed and in PATH")
     def test_hook_script_execution(self, temp_project, sample_python_file, monkeypatch):
         """The actual hook shell script executes correctly."""
         monkeypatch.chdir(temp_project)
