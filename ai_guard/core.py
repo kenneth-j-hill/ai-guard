@@ -56,13 +56,17 @@ def normalize_path(path: str) -> str:
 def compute_hash(content: str) -> str:
     """Compute a SHA-256 hash of the content.
 
+    Line endings are normalized (CR stripped) before hashing to ensure
+    consistent hashes across Windows (CRLF) and Unix (LF) systems.
+
     Args:
         content: The content to hash.
 
     Returns:
         The first 16 characters of the hex digest.
     """
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+    normalized = content.replace('\r', '')
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
 
 def compute_file_hash(filepath: Path) -> str:
