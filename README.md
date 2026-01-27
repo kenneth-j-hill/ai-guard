@@ -120,14 +120,15 @@ ai-guard add file1.py file2.py:func
 ai-guard add "src/*.py" "tests/*.py:Test*"
 ```
 
-### `ai-guard update <target> [target ...]`
+### `ai-guard update [--all | <target> ...]`
 
-Update the hash after intentionally modifying protected code. Accepts multiple targets and glob patterns.
+Update the hash after intentionally modifying protected code. Accepts multiple targets and glob patterns, or use `--all` to update all existing entries.
 
 ```bash
 ai-guard update path/to/file.py
 ai-guard update path/to/file.py:my_function
 ai-guard update "src/*.py"
+ai-guard update --all
 ```
 
 ### `ai-guard remove <target> [target ...]`

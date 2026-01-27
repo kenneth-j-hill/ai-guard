@@ -1,7 +1,7 @@
-.ai-guard:22e337fd214073e0
+.ai-guard:2bf8387b0812ff24
 tests/test_cli.py:TestParseTarget:3a38ea38f3efb471
 tests/test_cli.py:TestVerifyCommand:00efa4b26f55eb81
-tests/test_cli.py:TestUpdateCommand:cb22ac9d69ec7981
+tests/test_cli.py:TestUpdateCommand:dced022560f6858e
 tests/test_cli.py:TestRemoveCommand:f6c60ef5a3c29574
 tests/test_cli.py:TestListCommand:2029489525174033
 tests/test_file_protection.py:TestWholeFileProtection:bb964eabe936f83b
