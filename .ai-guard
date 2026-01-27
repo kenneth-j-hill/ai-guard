@@ -1,5 +1,4 @@
-.ai-guard:2bf8387b0812ff24
-tests/test_cli.py:TestParseTarget:3a38ea38f3efb471
+.ai-guard:040383082a0014c6
 tests/test_cli.py:TestVerifyCommand:00efa4b26f55eb81
 tests/test_cli.py:TestUpdateCommand:dced022560f6858e
 tests/test_cli.py:TestRemoveCommand:f6c60ef5a3c29574
@@ -27,3 +26,4 @@ tests/test_cli.py:TestAddCommand:35b51df896a51653
 tests/test_gcc_parser.py:TestGCCParserEdgeCases:3f9da598bd4777ff
 tests/test_hook.py:TestHookInstallation:ea4fd0b209f81a65
 tests/test_integration.py:TestPreCommitHookIntegration:10a4963d3c0c9aed
+tests/test_cli.py:TestParseTarget:2482e07a5f641b8d

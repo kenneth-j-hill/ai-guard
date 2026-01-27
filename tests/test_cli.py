@@ -37,6 +37,24 @@ class TestParseTarget:
         assert path == "src/deep/nested/module.py"
         assert identifier == "func"
 
+    def test_glob_with_extension_and_identifier(self):
+        """Glob pattern with extension and identifier is parsed correctly."""
+        path, identifier = parse_target("tests/test_*.py:*")
+        assert path == "tests/test_*.py"
+        assert identifier == "*"
+
+    def test_glob_without_extension(self):
+        """Glob pattern without visible extension splits on last colon."""
+        path, identifier = parse_target("tests/test_*:*")
+        assert path == "tests/test_*"
+        assert identifier == "*"
+
+    def test_glob_with_specific_identifier(self):
+        """Glob pattern with specific identifier pattern."""
+        path, identifier = parse_target("src/*:my_func")
+        assert path == "src/*"
+        assert identifier == "my_func"
+
 
 class TestAddCommand:
     """Tests for the 'add' command."""

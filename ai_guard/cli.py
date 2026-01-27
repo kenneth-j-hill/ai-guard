@@ -41,18 +41,34 @@ def parse_target(target: str) -> tuple[str, Optional[str]]:
 
     Returns:
         Tuple of (path, identifier or None)
+
+    Note:
+        Colons in filenames are not supported (they're invalid on Windows anyway).
+        The colon is used as delimiter between path and identifier.
     """
-    # Handle the case where there might be a colon in the path (Windows drive letter)
-    # But since we normalize to forward slashes, we can just split on the last colon
-    # after the file extension
-    if ":" in target:
-        # Find the .py (or similar) extension and split after it
-        for ext in [".py", ".pyw", ".js", ".ts", ".cpp", ".c", ".h", ".hpp", ".cc", ".cxx", ".hxx"]:
-            if ext + ":" in target:
-                idx = target.index(ext + ":") + len(ext)
-                path = target[:idx]
-                identifier = target[idx + 1:]
-                return path, identifier if identifier else None
+    if ":" not in target:
+        return target, None
+
+    # Look for known file extensions followed by colon, or glob patterns ending
+    # in a known extension followed by colon (e.g., "*.py:" or "test_*.py:")
+    import re
+    extensions = r"\.(?:py|pyw|js|jsx|ts|tsx|cpp|c|h|hpp|cc|cxx|hxx)"
+    # Match extension (possibly followed by glob chars) then colon
+    match = re.search(rf"({extensions}):", target)
+    if match:
+        idx = match.end() - 1  # Position of the colon
+        path = target[:idx]
+        identifier = target[idx + 1:]
+        return path, identifier if identifier else None
+
+    # Fallback: if path part looks like a glob pattern (contains * or ?),
+    # split on the last colon
+    if "*" in target or "?" in target:
+        idx = target.rfind(":")
+        path = target[:idx]
+        identifier = target[idx + 1:]
+        return path, identifier if identifier else None
+
     return target, None
 
 
