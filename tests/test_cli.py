@@ -191,6 +191,76 @@ class TestUpdateCommand:
         # Verify passes now
         assert main(["verify"]) == 0
 
+    def test_update_all(self, temp_project, sample_python_file, monkeypatch):
+        """'ai-guard update --all' updates all protected entries."""
+        config = temp_project / "config.py"
+        config.write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        main(["add", "config.py"])
+        main(["add", "sample.py:simple_function"])
+
+        # Modify both
+        config.write_text("SECRET = 99\n", encoding="utf-8")
+        original = sample_python_file.read_text()
+        sample_python_file.write_text(original.replace("return 1", "return 999"))
+
+        # Verify fails
+        assert main(["verify"]) == 1
+
+        # Update all
+        result = main(["update", "--all"])
+        assert result == 0
+
+        # Verify passes now
+        assert main(["verify"]) == 0
+
+    def test_update_all_unchanged(self, temp_project, monkeypatch, capsys):
+        """'ai-guard update --all' only shows entries that changed."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        main(["add", "config.py"])
+
+        # Update without changing anything
+        result = main(["update", "--all"])
+        assert result == 0
+
+        # Should not print "Updated" since nothing changed
+        captured = capsys.readouterr()
+        assert "Updated" not in captured.out
+
+    def test_update_all_empty(self, temp_project, monkeypatch, capsys):
+        """'ai-guard update --all' with no entries shows message."""
+        monkeypatch.chdir(temp_project)
+        result = main(["update", "--all"])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "No protected entries" in captured.out
+
+    def test_update_all_with_targets_fails(self, temp_project, monkeypatch, capsys):
+        """'ai-guard update --all file.py' is invalid."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        result = main(["update", "--all", "config.py"])
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "Cannot use --all with specific targets" in captured.err
+
+    def test_update_no_args_fails(self, temp_project, monkeypatch, capsys):
+        """'ai-guard update' without args or --all fails."""
+        monkeypatch.chdir(temp_project)
+        result = main(["update"])
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "Must specify targets or use --all" in captured.err
+
 
 class TestRemoveCommand:
     """Tests for the 'remove' command."""

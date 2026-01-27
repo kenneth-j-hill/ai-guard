@@ -127,28 +127,64 @@ def cmd_add(args: argparse.Namespace) -> int:
 
 def cmd_update(args: argparse.Namespace) -> int:
     """Update the hash for a protected entry."""
+    if args.all and args.targets:
+        print("Error: Cannot use --all with specific targets", file=sys.stderr)
+        return 1
+    if not args.all and not args.targets:
+        print("Error: Must specify targets or use --all", file=sys.stderr)
+        return 1
+
     root = find_project_root()
     guard = GuardFile(root)
 
     any_success = False
     any_error = False
 
-    for target in args.targets:
-        for path, identifier in expand_glob_target(root, target):
+    if args.all:
+        # Update all existing entries
+        existing_entries = guard.list_entries()
+        if not existing_entries:
+            print("No protected entries to update")
+            return 0
+
+        for entry in existing_entries:
+            # Skip self-protection entry - it's computed automatically
+            if entry.path == ".ai-guard" and entry.identifier is None:
+                continue
+
+            old_hash = entry.hash
             try:
-                entries = guard.update(path, identifier)
-                for entry in entries:
-                    if entry.identifier:
-                        print(f"Updated {entry.path}:{entry.identifier} ({entry.hash})")
-                    else:
-                        print(f"Updated {entry.path} ({entry.hash})")
+                updated = guard.update(entry.path, entry.identifier)
+                for upd in updated:
+                    if upd.hash != old_hash:
+                        if upd.identifier:
+                            print(f"Updated {upd.path}:{upd.identifier} ({upd.hash})")
+                        else:
+                            print(f"Updated {upd.path} ({upd.hash})")
                     any_success = True
             except FileNotFoundError:
-                print(f"Error: File not found: {path}", file=sys.stderr)
+                print(f"Error: File not found: {entry.path}", file=sys.stderr)
                 any_error = True
             except ValueError as e:
                 print(f"Error: {e}", file=sys.stderr)
                 any_error = True
+    else:
+        for target in args.targets:
+            for path, identifier in expand_glob_target(root, target):
+                try:
+                    entries = guard.update(path, identifier)
+                    for entry in entries:
+                        if entry.identifier:
+                            print(f"Updated {entry.path}:{entry.identifier} ({entry.hash})")
+                        else:
+                            print(f"Updated {entry.path} ({entry.hash})")
+                        any_success = True
+                except FileNotFoundError:
+                    print(f"Error: File not found: {path}", file=sys.stderr)
+                    any_error = True
+                except ValueError as e:
+                    print(f"Error: {e}", file=sys.stderr)
+                    any_error = True
 
     if any_success:
         guard.save()
@@ -292,8 +328,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         "update", help="Update the hash for a protected entry"
     )
     update_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Update all existing protected entries",
+    )
+    update_parser.add_argument(
         "targets",
-        nargs="+",
+        nargs="*",
         metavar="target",
         help='File or path:identifier to update. Supports globs: "src/*.py:func_*"',
     )
