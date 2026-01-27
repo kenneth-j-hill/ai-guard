@@ -4,6 +4,7 @@ These tests verify that the hook actually blocks commits when protected
 code is modified, and allows commits when it's restored.
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,19 @@ from ai_guard.cli import main
 
 # Check if ai-guard CLI is available in PATH (required for shell script tests)
 AI_GUARD_IN_PATH = shutil.which("ai-guard") is not None
+
+# Get the project root to ensure ai_guard is importable in subprocesses
+_PROJECT_ROOT = Path(__file__).parent.parent
+
+
+def _get_subprocess_env():
+    """Get environment with PYTHONPATH set for subprocess to find ai_guard."""
+    env = os.environ.copy()
+    pythonpath = str(_PROJECT_ROOT)
+    if "PYTHONPATH" in env:
+        pythonpath = f"{pythonpath}{os.pathsep}{env['PYTHONPATH']}"
+    env["PYTHONPATH"] = pythonpath
+    return env
 
 
 class TestPreCommitHookIntegration:
@@ -46,6 +60,7 @@ class TestPreCommitHookIntegration:
             [sys.executable, "-m", "ai_guard.cli", "verify"],
             capture_output=True,
             text=True,
+            env=_get_subprocess_env(),
         )
 
         # Hook should fail
@@ -60,6 +75,7 @@ class TestPreCommitHookIntegration:
             [sys.executable, "-m", "ai_guard.cli", "verify"],
             capture_output=True,
             text=True,
+            env=_get_subprocess_env(),
         )
 
         # Hook should pass now
