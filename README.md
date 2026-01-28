@@ -26,7 +26,7 @@ THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. AI-Guard is a d
 
 - **File-level protection** - Protect entire files from modification
 - **Identifier-level protection** - Protect specific functions, classes, or variables
-- **Class member protection** - Protect methods, properties, and class variables (Python uses dot notation: `MyClass.method`)
+- **Class member protection** - Protect methods, properties, and class variables (Python: `MyClass.method`, C/C++: `MyStruct::field`)
 - **Wildcard patterns** - Protect groups of identifiers (e.g., `test_invariant_*`, `MyClass.*`)
 - **Git integration** - Pre-commit hook blocks commits that modify protected code
 - **Self-protection** - The `.ai-guard` file protects itself from tampering
@@ -80,6 +80,12 @@ ai-guard add src/models.py:User.authenticate
 # Protect all methods in a class (Python)
 ai-guard add src/models.py:User.*
 
+# Protect a struct field (C/C++)
+ai-guard add src/config.h:Config::max_size
+
+# Protect all struct members (C/C++)
+ai-guard add src/point.h:Point::*
+
 # Protect multiple functions with a wildcard
 ai-guard add tests/test_core.py:test_invariant_*
 
@@ -123,11 +129,20 @@ ai-guard add path/to/file.py:MyClass.my_method
 # All members of a class (Python)
 ai-guard add path/to/file.py:MyClass.*
 
+# Struct/class member - C/C++ uses :: notation
+ai-guard add path/to/file.h:MyStruct::field
+
+# All members of a struct (C/C++)
+ai-guard add path/to/file.h:MyStruct::*
+
 # Wildcard pattern for identifiers
 ai-guard add path/to/file.py:test_*
 
 # Wildcard pattern for class members (Python)
 ai-guard add path/to/file.py:MyClass.test_*
+
+# Wildcard pattern for struct members (C/C++)
+ai-guard add path/to/file.h:Config::max_*
 
 # Multiple targets
 ai-guard add file1.py file2.py:func
@@ -182,7 +197,8 @@ tests/test_core.py:test_invariant_two:fedcba0987654321
 Format:
 - `path:hash` - whole file protection
 - `path:identifier:hash` - identifier protection
-- `path:Class.member:hash` - class member protection
+- `path:Class.member:hash` - Python class member
+- `path:Struct::member:hash` - C/C++ struct/class member
 
 ## What Gets Hashed
 

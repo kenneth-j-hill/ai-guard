@@ -28,6 +28,7 @@ class ProtectedEntry:
         Format:
             path/to/file.py:<hash>                    # whole file
             path/to/file.py:identifier:<hash>         # specific identifier
+            path/to/file.h:Struct::member:<hash>      # C/C++ struct/class member
 
         Returns:
             ProtectedEntry if valid, None otherwise.
@@ -36,16 +37,31 @@ class ProtectedEntry:
         if not line or line.startswith("#"):
             return None
 
-        parts = line.split(":")
-        if len(parts) == 2:
-            # Whole file: path:hash
-            return cls(path=normalize_path(parts[0]), identifier=None, hash=parts[1])
-        elif len(parts) == 3:
-            # Identifier: path:identifier:hash
-            return cls(
-                path=normalize_path(parts[0]), identifier=parts[1], hash=parts[2]
-            )
-        return None
+        # The hash is always the last 16 hex characters after the final colon
+        # Split from the right to handle identifiers containing colons (e.g., C++ ::)
+        last_colon = line.rfind(":")
+        if last_colon == -1:
+            return None
+
+        hash_part = line[last_colon + 1:]
+        rest = line[:last_colon]
+
+        # Now split the rest into path and optional identifier
+        # The path is everything before the first colon that follows a file extension
+        # For simplicity, find the first colon in rest
+        first_colon = rest.find(":")
+        if first_colon == -1:
+            # Whole file: path:hash (but we already removed hash)
+            # This means: rest = path
+            return cls(path=normalize_path(rest), identifier=None, hash=hash_part)
+
+        path = rest[:first_colon]
+        identifier = rest[first_colon + 1:]
+
+        if identifier:
+            return cls(path=normalize_path(path), identifier=identifier, hash=hash_part)
+        else:
+            return cls(path=normalize_path(path), identifier=None, hash=hash_part)
 
 
 def normalize_path(path: str) -> str:

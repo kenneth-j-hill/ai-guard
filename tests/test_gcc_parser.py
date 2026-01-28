@@ -455,3 +455,257 @@ int main(void) {
 '''
         parser = GCCParser()
         assert parser.check_syntax(source) is False
+
+
+class TestGCCParserStructMembers:
+    """Tests for parsing struct members using :: notation."""
+
+    def test_extract_struct_field(self):
+        """Can extract a struct field using :: notation."""
+        source = '''
+struct Point {
+    int x;
+    int y;
+};
+'''
+        parser = GCCParser()
+        ident = parser.extract_identifier(source, "Point::x")
+
+        assert ident is not None
+        assert ident.name == "Point::x"
+        assert "int x;" in ident.source
+
+    def test_extract_struct_field_with_pointer(self):
+        """Can extract a struct field that is a pointer."""
+        source = '''
+struct Node {
+    int value;
+    struct Node *next;
+};
+'''
+        parser = GCCParser()
+        ident = parser.extract_identifier(source, "Node::next")
+
+        assert ident is not None
+        assert ident.name == "Node::next"
+        assert "struct Node *next;" in ident.source
+
+    def test_list_struct_members(self):
+        """Can list all members of a struct."""
+        source = '''
+struct Rectangle {
+    int width;
+    int height;
+};
+'''
+        parser = GCCParser()
+        members = parser.list_struct_members(source, "Rectangle")
+
+        names = {m.name for m in members}
+        assert "Rectangle::width" in names
+        assert "Rectangle::height" in names
+
+    def test_protect_struct_member_wildcard(self):
+        """Wildcard pattern matches multiple struct members."""
+        source = '''
+struct Config {
+    int max_size;
+    int max_count;
+    char *name;
+};
+'''
+        parser = GCCParser()
+        members = parser.expand_identifier_pattern(source, "Config::max_*")
+
+        names = {m.name for m in members}
+        assert "Config::max_size" in names
+        assert "Config::max_count" in names
+        assert "Config::name" not in names
+
+    def test_protect_all_struct_members(self):
+        """Wildcard * matches all struct members."""
+        source = '''
+struct Point {
+    int x;
+    int y;
+    int z;
+};
+'''
+        parser = GCCParser()
+        members = parser.expand_identifier_pattern(source, "Point::*")
+
+        assert len(members) == 3
+        names = {m.name for m in members}
+        assert "Point::x" in names
+        assert "Point::y" in names
+        assert "Point::z" in names
+
+    def test_nonexistent_struct_member_returns_none(self):
+        """Returns None for nonexistent struct members."""
+        source = '''
+struct Point {
+    int x;
+    int y;
+};
+'''
+        parser = GCCParser()
+        result = parser.extract_identifier(source, "Point::z")
+        assert result is None
+
+    def test_nonexistent_struct_returns_empty_list(self):
+        """Returns empty list for nonexistent struct."""
+        source = '''
+struct Point {
+    int x;
+};
+'''
+        parser = GCCParser()
+        members = parser.list_struct_members(source, "NonExistent")
+        assert members == []
+
+
+class TestGPPParserClassMembers:
+    """Tests for parsing C++ class members using :: notation."""
+
+    def test_extract_class_method(self):
+        """Can extract a class method using :: notation."""
+        source = '''
+class Counter {
+public:
+    int get_count() const {
+        return count;
+    }
+private:
+    int count;
+};
+'''
+        parser = GPPParser()
+        ident = parser.extract_identifier(source, "Counter::get_count")
+
+        assert ident is not None
+        assert ident.name == "Counter::get_count"
+        assert "return count;" in ident.source
+
+    def test_extract_class_field(self):
+        """Can extract a class field using :: notation."""
+        source = '''
+class Counter {
+public:
+    void increment() { count++; }
+private:
+    int count;
+};
+'''
+        parser = GPPParser()
+        ident = parser.extract_identifier(source, "Counter::count")
+
+        assert ident is not None
+        assert ident.name == "Counter::count"
+        assert "int count;" in ident.source
+
+    def test_list_class_members(self):
+        """Can list all members of a C++ class."""
+        source = '''
+class Rectangle {
+public:
+    int area() const {
+        return width * height;
+    }
+private:
+    int width;
+    int height;
+};
+'''
+        parser = GPPParser()
+        members = parser.list_struct_members(source, "Rectangle")
+
+        names = {m.name for m in members}
+        assert "Rectangle::area" in names
+        assert "Rectangle::width" in names
+        assert "Rectangle::height" in names
+
+    def test_protect_class_method_with_wildcard(self):
+        """Wildcard pattern matches class methods."""
+        source = '''
+class Calculator {
+public:
+    int add(int a, int b) { return a + b; }
+    int subtract(int a, int b) { return a - b; }
+    int multiply(int a, int b) { return a * b; }
+};
+'''
+        parser = GPPParser()
+        # All methods
+        members = parser.expand_identifier_pattern(source, "Calculator::*")
+
+        assert len(members) == 3
+        names = {m.name for m in members}
+        assert "Calculator::add" in names
+        assert "Calculator::subtract" in names
+        assert "Calculator::multiply" in names
+
+    def test_struct_member_hash_changes_on_modification(self, temp_project):
+        """Changing a struct member changes the hash."""
+        from ai_guard.core import GuardFile
+
+        source1 = '''
+struct Config {
+    int max_size;
+};
+'''
+        source2 = '''
+struct Config {
+    int max_size;
+    int min_size;
+};
+'''
+        filepath = temp_project / "config.h"
+        filepath.write_text(source1)
+
+        guard = GuardFile(temp_project)
+        guard.add_identifier("config.h", "Config::max_size")
+        hash1 = guard.entries[0].hash
+
+        # The member itself doesn't change, but let's verify it still matches
+        filepath.write_text(source2)
+        guard2 = GuardFile(temp_project)
+        guard2.add_identifier("config.h", "Config::max_size")
+        hash2 = guard2.entries[0].hash
+
+        # Hash should be the same since max_size itself didn't change
+        assert hash1 == hash2
+
+    def test_verify_changed_struct_member_fails(self, temp_project):
+        """Verification fails when a protected struct member has been modified."""
+        from ai_guard.core import GuardFile
+
+        source1 = '''
+struct Point {
+    int x;
+    int y;
+};
+'''
+        source2 = '''
+struct Point {
+    float x;
+    int y;
+};
+'''
+        filepath = temp_project / "point.h"
+        filepath.write_text(source1)
+
+        guard = GuardFile(temp_project)
+        guard.add_identifier("point.h", "Point::x")
+        guard.save()
+
+        # Modify the member type
+        filepath.write_text(source2)
+
+        # Reload guard file to verify
+        guard2 = GuardFile(temp_project)
+        failures = guard2.verify()
+        # Filter out self-protection entry
+        member_failures = [(e, r) for e, r in failures if e.identifier is not None]
+        assert len(member_failures) == 1
+        assert member_failures[0][0].identifier == "Point::x"
+        assert member_failures[0][1] == "hash mismatch"
