@@ -5,6 +5,7 @@ files by using GCC to preprocess and validate the code, combined with regex
 parsing for identifier extraction.
 """
 
+import fnmatch
 import re
 import subprocess
 import tempfile
@@ -88,6 +89,43 @@ class GCCParserBase(Parser):
         re.MULTILINE | re.VERBOSE
     )
 
+    # Pattern for member functions within a struct/class body
+    MEMBER_FUNCTION_PATTERN = re.compile(
+        r"""
+        ^[ \t]*
+        (?:(?:static|inline|virtual|const|explicit)\s+)*
+        [\w_][\w_\s\*&:<>,]*?
+        [\s\*&]?
+        (?P<name>[\w_]+)
+        \s*
+        \([^)]*\)
+        \s*
+        (?:const\s*)?
+        (?:override\s*)?
+        (?:noexcept(?:\([^)]*\))?\s*)?
+        \s*
+        \{
+        """,
+        re.MULTILINE | re.VERBOSE
+    )
+
+    # Pattern for member fields within a struct/class body
+    MEMBER_FIELD_PATTERN = re.compile(
+        r"""
+        ^[ \t]*
+        (?:(?:static|const|volatile|mutable)\s+)*
+        [\w_][\w_\s\*&:<>,]*?
+        [\s\*&]
+        (?P<name>[\w_]+)
+        \s*
+        (?:\[[^\]]*\])?
+        \s*
+        (?:=\s*[^;]+)?
+        \s*;
+        """,
+        re.MULTILINE | re.VERBOSE
+    )
+
     # Pattern for global variables
     GLOBAL_VAR_PATTERN = re.compile(
         r"""
@@ -132,24 +170,6 @@ class GCCParserBase(Parser):
             return False
         finally:
             Path(temp_path).unlink(missing_ok=True)
-
-    def extract_identifier(self, source: str, name: str) -> Optional[Identifier]:
-        """Extract a specific identifier from C/C++ source code."""
-        lines = source.split("\n")
-
-        # Try each pattern type
-        for finder in [
-            self._find_function,
-            self._find_struct_class,
-            self._find_typedef,
-            self._find_macro,
-            self._find_global_var,
-        ]:
-            identifier = finder(source, lines, name)
-            if identifier:
-                return identifier
-
-        return None
 
     def list_identifiers(self, source: str) -> list[Identifier]:
         """List all top-level identifiers in C/C++ source code."""
@@ -458,6 +478,252 @@ class GCCParserBase(Parser):
             pos += 1
 
         return pos - 1 if depth == 0 else -1
+
+    def expand_identifier_pattern(self, source: str, pattern: str) -> list[Identifier]:
+        """Expand an identifier pattern to matching identifiers.
+
+        Supports C/C++ scope resolution operator for struct/class members:
+        - "MyStruct::field" - specific struct/class member
+        - "MyClass::*" - all members of a struct/class
+        - "MyClass::get_*" - members matching a pattern
+
+        Args:
+            source: The full source code of the file.
+            pattern: The identifier pattern, possibly with wildcards or :: notation.
+
+        Returns:
+            A list of matching Identifier objects.
+        """
+        # Check for C/C++ scope resolution operator
+        if "::" in pattern:
+            parts = pattern.split("::", 1)
+            struct_name, member_pattern = parts
+
+            # Get all members of the struct/class
+            all_members = self.list_struct_members(source, struct_name)
+
+            # Filter by member pattern (which may include wildcards)
+            if "*" in member_pattern or "?" in member_pattern:
+                full_pattern = f"{struct_name}::{member_pattern}"
+                return [m for m in all_members if fnmatch.fnmatch(m.name, full_pattern)]
+            else:
+                return [m for m in all_members if m.name == pattern]
+
+        # Fall back to base implementation for top-level identifiers
+        return super().expand_identifier_pattern(source, pattern)
+
+    def extract_identifier(self, source: str, name: str) -> Optional[Identifier]:
+        """Extract a specific identifier from C/C++ source code."""
+        lines = source.split("\n")
+
+        # Check for struct/class member notation
+        if "::" in name:
+            return self._extract_struct_member(source, lines, name)
+
+        # Try each pattern type
+        for finder in [
+            self._find_function,
+            self._find_struct_class,
+            self._find_typedef,
+            self._find_macro,
+            self._find_global_var,
+        ]:
+            identifier = finder(source, lines, name)
+            if identifier:
+                return identifier
+
+        return None
+
+    def _extract_struct_member(
+        self, source: str, lines: list[str], qualified_name: str
+    ) -> Optional[Identifier]:
+        """Extract a struct/class member using :: notation.
+
+        Args:
+            source: The full source code.
+            lines: Source code split into lines.
+            qualified_name: Name in format "StructName::member_name".
+
+        Returns:
+            An Identifier if found, None otherwise.
+        """
+        parts = qualified_name.split("::", 1)
+        if len(parts) != 2:
+            return None
+        struct_name, member_name = parts
+
+        # Find the struct/class
+        struct_ident = self._find_struct_class(source, lines, struct_name)
+        if not struct_ident:
+            return None
+
+        # Parse members within the struct body
+        struct_source = struct_ident.source
+        struct_lines = struct_source.split("\n")
+
+        # Find the member within the struct
+        member = self._find_member_in_struct(struct_source, struct_lines, member_name, qualified_name)
+        return member
+
+    def _find_member_in_struct(
+        self, struct_source: str, struct_lines: list[str], member_name: str, qualified_name: str
+    ) -> Optional[Identifier]:
+        """Find a specific member within a struct/class body.
+
+        Args:
+            struct_source: The source code of the struct/class.
+            struct_lines: Source lines of the struct.
+            member_name: The member name to find.
+            qualified_name: The full qualified name (StructName::member).
+
+        Returns:
+            An Identifier if found, None otherwise.
+        """
+        # Find the opening brace
+        brace_idx = struct_source.find("{")
+        if brace_idx == -1:
+            return None
+
+        # Get content between braces (excluding the struct declaration line and closing)
+        body_start = brace_idx + 1
+        body_end = struct_source.rfind("}")
+        if body_end == -1:
+            body_end = len(struct_source)
+        body = struct_source[body_start:body_end]
+
+        # Try to find member as a function
+        func_ident = self._find_member_function(body, member_name, qualified_name)
+        if func_ident:
+            return func_ident
+
+        # Try to find member as a field
+        field_ident = self._find_member_field(body, member_name, qualified_name)
+        if field_ident:
+            return field_ident
+
+        return None
+
+    def _find_member_function(
+        self, body: str, member_name: str, qualified_name: str
+    ) -> Optional[Identifier]:
+        """Find a member function within a struct/class body."""
+        for match in self._iter_member_functions(body):
+            if match.group("name") != member_name:
+                continue
+
+            start_pos = match.start()
+            brace_pos = match.end() - 1
+            end_pos = self._find_matching_brace(body, brace_pos)
+            if end_pos == -1:
+                return None
+
+            member_source = body[start_pos:end_pos + 1].strip()
+            start_line = body[:start_pos].count("\n") + 1
+            end_line = body[:end_pos + 1].count("\n") + 1
+
+            return Identifier(
+                name=qualified_name,
+                source=member_source,
+                start_line=start_line,
+                end_line=end_line,
+            )
+        return None
+
+    def _find_member_field(
+        self, body: str, member_name: str, qualified_name: str
+    ) -> Optional[Identifier]:
+        """Find a member field (variable) within a struct/class body."""
+        for match in self._iter_member_fields(body):
+            if match.group("name") != member_name:
+                continue
+
+            member_source = match.group(0).strip()
+            start_pos = match.start()
+            end_pos = match.end()
+            start_line = body[:start_pos].count("\n") + 1
+            end_line = body[:end_pos].count("\n") + 1
+
+            return Identifier(
+                name=qualified_name,
+                source=member_source,
+                start_line=start_line,
+                end_line=end_line,
+            )
+        return None
+
+    def list_struct_members(self, source: str, struct_name: str) -> list[Identifier]:
+        """List all members of a specific struct/class.
+
+        Args:
+            source: The full source code of the file.
+            struct_name: Name of the struct/class to list members for.
+
+        Returns:
+            A list of all identifiers (methods, fields) in the struct/class.
+            Names are qualified with the struct name (e.g., "StructName::field").
+        """
+        lines = source.split("\n")
+        identifiers = []
+
+        # Find the struct/class
+        struct_ident = self._find_struct_class(source, lines, struct_name)
+        if not struct_ident:
+            return []
+
+        struct_source = struct_ident.source
+
+        # Find the opening brace
+        brace_idx = struct_source.find("{")
+        if brace_idx == -1:
+            return []
+
+        # Get content between braces
+        body_start = brace_idx + 1
+        body_end = struct_source.rfind("}")
+        if body_end == -1:
+            body_end = len(struct_source)
+        body = struct_source[body_start:body_end]
+
+        # Find all member functions
+        for match in self._iter_member_functions(body):
+            name = match.group("name")
+            qualified_name = f"{struct_name}::{name}"
+            member = self._find_member_function(body, name, qualified_name)
+            if member:
+                identifiers.append(member)
+
+        # Find all member fields
+        for match in self._iter_member_fields(body):
+            name = match.group("name")
+            qualified_name = f"{struct_name}::{name}"
+            # Avoid duplicates (in case pattern matches function names too)
+            if not any(i.name == qualified_name for i in identifiers):
+                member = self._find_member_field(body, name, qualified_name)
+                if member:
+                    identifiers.append(member)
+
+        return identifiers
+
+    def _iter_member_functions(self, body: str):
+        """Iterate over member function matches in a struct body."""
+        seen = set()
+        for match in self.MEMBER_FUNCTION_PATTERN.finditer(body):
+            name = match.group("name")
+            # Skip control flow keywords
+            if name in ("if", "while", "for", "switch", "return", "sizeof"):
+                continue
+            if name not in seen:
+                seen.add(name)
+                yield match
+
+    def _iter_member_fields(self, body: str):
+        """Iterate over member field matches in a struct body."""
+        seen = set()
+        for match in self.MEMBER_FIELD_PATTERN.finditer(body):
+            name = match.group("name")
+            if name not in seen:
+                seen.add(name)
+                yield match
 
 
 class GCCParser(GCCParserBase):

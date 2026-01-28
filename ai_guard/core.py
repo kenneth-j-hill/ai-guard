@@ -28,6 +28,7 @@ class ProtectedEntry:
         Format:
             path/to/file.py:<hash>                    # whole file
             path/to/file.py:identifier:<hash>         # specific identifier
+            path/to/file.h:Struct::member:<hash>      # C/C++ struct/class member
 
         Returns:
             ProtectedEntry if valid, None otherwise.
@@ -36,16 +37,31 @@ class ProtectedEntry:
         if not line or line.startswith("#"):
             return None
 
-        parts = line.split(":")
-        if len(parts) == 2:
-            # Whole file: path:hash
-            return cls(path=normalize_path(parts[0]), identifier=None, hash=parts[1])
-        elif len(parts) == 3:
-            # Identifier: path:identifier:hash
-            return cls(
-                path=normalize_path(parts[0]), identifier=parts[1], hash=parts[2]
-            )
-        return None
+        # The hash is always the last 16 hex characters after the final colon
+        # Split from the right to handle identifiers containing colons (e.g., C++ ::)
+        last_colon = line.rfind(":")
+        if last_colon == -1:
+            return None
+
+        hash_part = line[last_colon + 1:]
+        rest = line[:last_colon]
+
+        # Now split the rest into path and optional identifier
+        # The path is everything before the first colon that follows a file extension
+        # For simplicity, find the first colon in rest
+        first_colon = rest.find(":")
+        if first_colon == -1:
+            # Whole file: path:hash (but we already removed hash)
+            # This means: rest = path
+            return cls(path=normalize_path(rest), identifier=None, hash=hash_part)
+
+        path = rest[:first_colon]
+        identifier = rest[first_colon + 1:]
+
+        if identifier:
+            return cls(path=normalize_path(path), identifier=identifier, hash=hash_part)
+        else:
+            return cls(path=normalize_path(path), identifier=None, hash=hash_part)
 
 
 def normalize_path(path: str) -> str:
@@ -196,6 +212,8 @@ class GuardFile:
         Args:
             path: Path to the file (relative to root).
             identifier: Name of the identifier (supports wildcards like test_*).
+                        For nested identifiers (e.g., class members), the syntax
+                        depends on the language parser (e.g., Class.method for Python).
 
         Returns:
             List of created ProtectedEntry objects.
@@ -210,19 +228,17 @@ class GuardFile:
             raise ValueError(f"No parser available for {filepath}")
 
         source = filepath.read_text(encoding="utf-8")
-        all_identifiers = parser.list_identifiers(source)
 
-        # Filter by wildcard pattern
-        if "*" in identifier or "?" in identifier:
-            matching = [i for i in all_identifiers if fnmatch.fnmatch(i.name, identifier)]
-        else:
-            matching = [i for i in all_identifiers if i.name == identifier]
+        # Let the parser expand the identifier pattern to a list of identifiers.
+        # This allows each parser to handle nested identifiers (e.g., class members)
+        # using language-appropriate syntax.
+        all_identifiers = parser.expand_identifier_pattern(source, identifier)
 
-        if not matching:
+        if not all_identifiers:
             raise ValueError(f"No identifiers matching '{identifier}' found in {path}")
 
         created = []
-        for ident in matching:
+        for ident in all_identifiers:
             ident_hash = compute_hash(ident.source)
 
             # Remove existing entry for this path/identifier if present

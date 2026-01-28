@@ -55,6 +55,24 @@ class TestParseTarget:
         assert path == "src/*"
         assert identifier == "my_func"
 
+    def test_class_member_dotted_notation(self):
+        """Class member with dot notation is parsed correctly."""
+        path, identifier = parse_target("src/models.py:MyClass.method")
+        assert path == "src/models.py"
+        assert identifier == "MyClass.method"
+
+    def test_class_member_wildcard(self):
+        """Class member wildcard pattern is parsed correctly."""
+        path, identifier = parse_target("src/models.py:MyClass.*")
+        assert path == "src/models.py"
+        assert identifier == "MyClass.*"
+
+    def test_class_member_partial_wildcard(self):
+        """Class member partial wildcard pattern is parsed correctly."""
+        path, identifier = parse_target("src/models.py:MyClass.test_*")
+        assert path == "src/models.py"
+        assert identifier == "MyClass.test_*"
+
 
 class TestAddCommand:
     """Tests for the 'add' command."""
@@ -109,6 +127,27 @@ class TestAddCommand:
         result = main(["add", "sample.py:nonexistent"])
 
         assert result == 1
+
+    def test_add_class_member(self, temp_project, sample_python_file, monkeypatch):
+        """'ai-guard add file.py:Class.method' protects a class member."""
+        monkeypatch.chdir(temp_project)
+        result = main(["add", "sample.py:SimpleClass.method"])
+
+        assert result == 0
+
+        content = (temp_project / ".ai-guard").read_text()
+        assert "sample.py:SimpleClass.method:" in content
+
+    def test_add_class_member_wildcard(self, temp_project, sample_python_file, monkeypatch):
+        """'ai-guard add file.py:Class.*' protects all class members."""
+        monkeypatch.chdir(temp_project)
+        result = main(["add", "sample.py:DecoratedClass.*"])
+
+        assert result == 0
+
+        content = (temp_project / ".ai-guard").read_text()
+        assert "DecoratedClass.prop" in content
+        assert "DecoratedClass.static_method" in content
 
     def test_add_multiple_targets(self, temp_project, monkeypatch):
         """'ai-guard add file1.py file2.py' protects multiple files."""

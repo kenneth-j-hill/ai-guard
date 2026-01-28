@@ -26,7 +26,8 @@ THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. AI-Guard is a d
 
 - **File-level protection** - Protect entire files from modification
 - **Identifier-level protection** - Protect specific functions, classes, or variables
-- **Wildcard patterns** - Protect groups of identifiers (e.g., `test_invariant_*`)
+- **Class member protection** - Protect methods, properties, and class variables (Python: `MyClass.method`, C/C++: `MyStruct::field`)
+- **Wildcard patterns** - Protect groups of identifiers (e.g., `test_invariant_*`, `MyClass.*`)
 - **Git integration** - Pre-commit hook blocks commits that modify protected code
 - **Self-protection** - The `.ai-guard` file protects itself from tampering
 - **Extensible** - Pluggable parser system for language support (Python and C/C++ included)
@@ -73,6 +74,18 @@ ai-guard add src/auth.py
 # Protect a specific function
 ai-guard add src/billing.py:calculate_tax
 
+# Protect a class method (Python)
+ai-guard add src/models.py:User.authenticate
+
+# Protect all methods in a class (Python)
+ai-guard add src/models.py:User.*
+
+# Protect a struct field (C/C++)
+ai-guard add src/config.h:Config::max_size
+
+# Protect all struct members (C/C++)
+ai-guard add src/point.h:Point::*
+
 # Protect multiple functions with a wildcard
 ai-guard add tests/test_core.py:test_invariant_*
 
@@ -110,8 +123,26 @@ ai-guard add path/to/file.py
 # Specific identifier (function, class, variable)
 ai-guard add path/to/file.py:my_function
 
+# Class member - Python uses dot notation (method, property, class variable)
+ai-guard add path/to/file.py:MyClass.my_method
+
+# All members of a class (Python)
+ai-guard add path/to/file.py:MyClass.*
+
+# Struct/class member - C/C++ uses :: notation
+ai-guard add path/to/file.h:MyStruct::field
+
+# All members of a struct (C/C++)
+ai-guard add path/to/file.h:MyStruct::*
+
 # Wildcard pattern for identifiers
 ai-guard add path/to/file.py:test_*
+
+# Wildcard pattern for class members (Python)
+ai-guard add path/to/file.py:MyClass.test_*
+
+# Wildcard pattern for struct members (C/C++)
+ai-guard add path/to/file.h:Config::max_*
 
 # Multiple targets
 ai-guard add file1.py file2.py:func
@@ -166,16 +197,25 @@ tests/test_core.py:test_invariant_two:fedcba0987654321
 Format:
 - `path:hash` - whole file protection
 - `path:identifier:hash` - identifier protection
+- `path:Class.member:hash` - Python class member
+- `path:Struct::member:hash` - C/C++ struct/class member
+
+The colon (`:`) is used as a delimiter, so file paths containing colons are not supported. This is consistent with Git, which also uses colons as delimiters in path specifications.
 
 ## What Gets Hashed
 
 For **files**: the entire file content.
 
-For **identifiers**: everything that defines the identifier:
+For **identifiers** (functions, classes, variables): everything that defines the identifier:
 - Decorators
 - Signature (name, parameters, return type annotation)
 - Docstring
 - Body
+
+For **class members** (methods, properties, class variables): the same as identifiers, scoped to the member:
+- Decorators (e.g., `@property`, `@staticmethod`)
+- Method signature
+- Method body
 
 This means changing any of these will trigger a protection violation.
 

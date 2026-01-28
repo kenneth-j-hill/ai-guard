@@ -162,3 +162,108 @@ class TestDecoratedIdentifiers:
         new_hash = guard2.entries[0].hash
 
         assert original_hash != new_hash
+
+
+class TestClassMemberProtection:
+    """Tests for protecting class members (methods, properties, class vars)."""
+
+    def test_protect_class_method(self, temp_project, sample_python_file):
+        """A method within a class can be protected using dot notation."""
+        guard = GuardFile(temp_project)
+        entries = guard.add_identifier("sample.py", "SimpleClass.method")
+
+        assert len(entries) == 1
+        assert entries[0].path == "sample.py"
+        assert entries[0].identifier == "SimpleClass.method"
+        assert len(entries[0].hash) == 16
+
+    def test_protect_decorated_method(self, temp_project, sample_python_file):
+        """A decorated method includes its decorator in the hash."""
+        guard = GuardFile(temp_project)
+        entries = guard.add_identifier("sample.py", "DecoratedClass.prop")
+
+        assert len(entries) == 1
+        assert entries[0].identifier == "DecoratedClass.prop"
+
+    def test_protect_static_method(self, temp_project, sample_python_file):
+        """Static methods can be protected."""
+        guard = GuardFile(temp_project)
+        entries = guard.add_identifier("sample.py", "DecoratedClass.static_method")
+
+        assert len(entries) == 1
+        assert entries[0].identifier == "DecoratedClass.static_method"
+
+    def test_verify_unchanged_method_passes(self, temp_project, sample_python_file):
+        """Verification passes when a protected method hasn't changed."""
+        guard = GuardFile(temp_project)
+        guard.add_identifier("sample.py", "SimpleClass.method")
+        guard.save()
+
+        failures = guard.verify()
+        assert len(failures) == 0
+
+    def test_verify_changed_method_fails(self, temp_project, sample_python_file):
+        """Verification fails when a protected method has been modified."""
+        guard = GuardFile(temp_project)
+        guard.add_identifier("sample.py", "SimpleClass.method")
+        guard.save()
+
+        # Modify the method
+        content = sample_python_file.read_text()
+        content = content.replace("return self", "return None")
+        sample_python_file.write_text(content)
+
+        failures = guard.verify()
+        assert len(failures) == 1
+        assert failures[0][0].identifier == "SimpleClass.method"
+        assert failures[0][1] == "hash mismatch"
+
+    def test_protect_all_class_members_with_wildcard(self, temp_project, sample_python_file):
+        """Wildcard can protect all members of a class."""
+        guard = GuardFile(temp_project)
+        entries = guard.add_identifier("sample.py", "DecoratedClass.*")
+
+        # Should match prop and static_method
+        assert len(entries) == 2
+        names = {e.identifier for e in entries}
+        assert "DecoratedClass.prop" in names
+        assert "DecoratedClass.static_method" in names
+
+    def test_protect_specific_members_with_wildcard(self, temp_project, sample_python_file):
+        """Wildcard patterns filter class members."""
+        guard = GuardFile(temp_project)
+        entries = guard.add_identifier("sample.py", "DecoratedClass.static_*")
+
+        assert len(entries) == 1
+        assert entries[0].identifier == "DecoratedClass.static_method"
+
+    def test_nonexistent_class_member_raises(self, temp_project, sample_python_file):
+        """Adding protection for a nonexistent class member raises an error."""
+        guard = GuardFile(temp_project)
+
+        with pytest.raises(ValueError, match="No identifiers matching"):
+            guard.add_identifier("sample.py", "SimpleClass.nonexistent")
+
+    def test_nonexistent_class_raises(self, temp_project, sample_python_file):
+        """Adding protection for a nonexistent class raises an error."""
+        guard = GuardFile(temp_project)
+
+        with pytest.raises(ValueError, match="No identifiers matching"):
+            guard.add_identifier("sample.py", "NonexistentClass.method")
+
+    def test_decorated_method_hash_includes_decorator(self, temp_project, sample_python_file):
+        """Changing a method's decorator changes its hash."""
+        guard = GuardFile(temp_project)
+        entries = guard.add_identifier("sample.py", "DecoratedClass.prop")
+        original_hash = entries[0].hash
+
+        # Modify the decorator
+        content = sample_python_file.read_text()
+        content = content.replace("@property", "@cached_property")
+        sample_python_file.write_text(content)
+
+        guard2 = GuardFile(temp_project)
+        guard2.add_identifier("sample.py", "DecoratedClass.prop")
+        new_hash = guard2.entries[0].hash
+
+        assert original_hash != new_hash

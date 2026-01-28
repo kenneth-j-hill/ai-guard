@@ -1,4 +1,4 @@
-.ai-guard:040383082a0014c6
+.ai-guard:ebe3d314708038fe
 tests/test_cli.py:TestVerifyCommand:00efa4b26f55eb81
 tests/test_cli.py:TestUpdateCommand:dced022560f6858e
 tests/test_cli.py:TestRemoveCommand:f6c60ef5a3c29574
@@ -22,8 +22,8 @@ tests/test_parser_interface.py:TestParserRegistry:7562056ace0e5575
 tests/test_parser_interface.py:TestPythonParser:97fc05aa8dc57288
 tests/test_parser_interface.py:TestAddingNewLanguageSupport:684921c2af2d2d87
 tests/test_wildcards.py:TestWildcardPatterns:731e12da8911e75a
-tests/test_cli.py:TestAddCommand:35b51df896a51653
+tests/test_cli.py:TestAddCommand:fdc84e29a58a49ec
 tests/test_gcc_parser.py:TestGCCParserEdgeCases:3f9da598bd4777ff
 tests/test_hook.py:TestHookInstallation:ea4fd0b209f81a65
-tests/test_integration.py:TestPreCommitHookIntegration:10a4963d3c0c9aed
-tests/test_cli.py:TestParseTarget:2482e07a5f641b8d
+tests/test_integration.py:TestPreCommitHookIntegration:5c030c26bd5a4be7
+tests/test_cli.py:TestParseTarget:18b3c71c33c47543
