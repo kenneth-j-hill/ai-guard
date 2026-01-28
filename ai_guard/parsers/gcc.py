@@ -89,6 +89,43 @@ class GCCParserBase(Parser):
         re.MULTILINE | re.VERBOSE
     )
 
+    # Pattern for member functions within a struct/class body
+    MEMBER_FUNCTION_PATTERN = re.compile(
+        r"""
+        ^[ \t]*
+        (?:(?:static|inline|virtual|const|explicit)\s+)*
+        [\w_][\w_\s\*&:<>,]*?
+        [\s\*&]?
+        (?P<name>[\w_]+)
+        \s*
+        \([^)]*\)
+        \s*
+        (?:const\s*)?
+        (?:override\s*)?
+        (?:noexcept(?:\([^)]*\))?\s*)?
+        \s*
+        \{
+        """,
+        re.MULTILINE | re.VERBOSE
+    )
+
+    # Pattern for member fields within a struct/class body
+    MEMBER_FIELD_PATTERN = re.compile(
+        r"""
+        ^[ \t]*
+        (?:(?:static|const|volatile|mutable)\s+)*
+        [\w_][\w_\s\*&:<>,]*?
+        [\s\*&]
+        (?P<name>[\w_]+)
+        \s*
+        (?:\[[^\]]*\])?
+        \s*
+        (?:=\s*[^;]+)?
+        \s*;
+        """,
+        re.MULTILINE | re.VERBOSE
+    )
+
     # Pattern for global variables
     GLOBAL_VAR_PATTERN = re.compile(
         r"""
@@ -570,84 +607,49 @@ class GCCParserBase(Parser):
         self, body: str, member_name: str, qualified_name: str
     ) -> Optional[Identifier]:
         """Find a member function within a struct/class body."""
-        # Pattern for member function
-        pattern = re.compile(
-            rf"""
-            ^[ \t]*
-            (?:(?:static|inline|virtual|const|explicit)\s+)*
-            [\w_][\w_\s\*&:<>,]*?
-            [\s\*&]?
-            {re.escape(member_name)}
-            \s*
-            \([^)]*\)
-            \s*
-            (?:const\s*)?
-            (?:override\s*)?
-            (?:noexcept(?:\([^)]*\))?\s*)?
-            \s*
-            \{{
-            """,
-            re.MULTILINE | re.VERBOSE
-        )
+        for match in self._iter_member_functions(body):
+            if match.group("name") != member_name:
+                continue
 
-        match = pattern.search(body)
-        if not match:
-            return None
+            start_pos = match.start()
+            brace_pos = match.end() - 1
+            end_pos = self._find_matching_brace(body, brace_pos)
+            if end_pos == -1:
+                return None
 
-        start_pos = match.start()
-        brace_pos = match.end() - 1
-        end_pos = self._find_matching_brace(body, brace_pos)
-        if end_pos == -1:
-            return None
+            member_source = body[start_pos:end_pos + 1].strip()
+            start_line = body[:start_pos].count("\n") + 1
+            end_line = body[:end_pos + 1].count("\n") + 1
 
-        member_source = body[start_pos:end_pos + 1].strip()
-        start_line = body[:start_pos].count("\n") + 1
-        end_line = body[:end_pos + 1].count("\n") + 1
-
-        return Identifier(
-            name=qualified_name,
-            source=member_source,
-            start_line=start_line,
-            end_line=end_line,
-        )
+            return Identifier(
+                name=qualified_name,
+                source=member_source,
+                start_line=start_line,
+                end_line=end_line,
+            )
+        return None
 
     def _find_member_field(
         self, body: str, member_name: str, qualified_name: str
     ) -> Optional[Identifier]:
         """Find a member field (variable) within a struct/class body."""
-        # Pattern for member field
-        pattern = re.compile(
-            rf"""
-            ^[ \t]*
-            (?:(?:static|const|volatile|mutable)\s+)*
-            [\w_][\w_\s\*&:<>,]*?
-            [\s\*&]
-            {re.escape(member_name)}
-            \s*
-            (?:\[[^\]]*\])?           # Optional array brackets
-            \s*
-            (?:=\s*[^;]+)?            # Optional initializer
-            \s*;
-            """,
-            re.MULTILINE | re.VERBOSE
-        )
+        for match in self._iter_member_fields(body):
+            if match.group("name") != member_name:
+                continue
 
-        match = pattern.search(body)
-        if not match:
-            return None
+            member_source = match.group(0).strip()
+            start_pos = match.start()
+            end_pos = match.end()
+            start_line = body[:start_pos].count("\n") + 1
+            end_line = body[:end_pos].count("\n") + 1
 
-        member_source = match.group(0).strip()
-        start_pos = match.start()
-        end_pos = match.end()
-        start_line = body[:start_pos].count("\n") + 1
-        end_line = body[:end_pos].count("\n") + 1
-
-        return Identifier(
-            name=qualified_name,
-            source=member_source,
-            start_line=start_line,
-            end_line=end_line,
-        )
+            return Identifier(
+                name=qualified_name,
+                source=member_source,
+                start_line=start_line,
+                end_line=end_line,
+            )
+        return None
 
     def list_struct_members(self, source: str, struct_name: str) -> list[Identifier]:
         """List all members of a specific struct/class.
@@ -704,26 +706,8 @@ class GCCParserBase(Parser):
 
     def _iter_member_functions(self, body: str):
         """Iterate over member function matches in a struct body."""
-        pattern = re.compile(
-            r"""
-            ^[ \t]*
-            (?:(?:static|inline|virtual|const|explicit)\s+)*
-            [\w_][\w_\s\*&:<>,]*?
-            [\s\*&]?
-            (?P<name>[\w_]+)
-            \s*
-            \([^)]*\)
-            \s*
-            (?:const\s*)?
-            (?:override\s*)?
-            (?:noexcept(?:\([^)]*\))?\s*)?
-            \s*
-            \{
-            """,
-            re.MULTILINE | re.VERBOSE
-        )
         seen = set()
-        for match in pattern.finditer(body):
+        for match in self.MEMBER_FUNCTION_PATTERN.finditer(body):
             name = match.group("name")
             # Skip control flow keywords
             if name in ("if", "while", "for", "switch", "return", "sizeof"):
@@ -734,23 +718,8 @@ class GCCParserBase(Parser):
 
     def _iter_member_fields(self, body: str):
         """Iterate over member field matches in a struct body."""
-        pattern = re.compile(
-            r"""
-            ^[ \t]*
-            (?:(?:static|const|volatile|mutable)\s+)*
-            [\w_][\w_\s\*&:<>,]*?
-            [\s\*&]
-            (?P<name>[\w_]+)
-            \s*
-            (?:\[[^\]]*\])?
-            \s*
-            (?:=\s*[^;]+)?
-            \s*;
-            """,
-            re.MULTILINE | re.VERBOSE
-        )
         seen = set()
-        for match in pattern.finditer(body):
+        for match in self.MEMBER_FIELD_PATTERN.finditer(body):
             name = match.group("name")
             if name not in seen:
                 seen.add(name)
