@@ -196,6 +196,8 @@ class GuardFile:
         Args:
             path: Path to the file (relative to root).
             identifier: Name of the identifier (supports wildcards like test_*).
+                        For nested identifiers (e.g., class members), the syntax
+                        depends on the language parser (e.g., Class.method for Python).
 
         Returns:
             List of created ProtectedEntry objects.
@@ -210,19 +212,17 @@ class GuardFile:
             raise ValueError(f"No parser available for {filepath}")
 
         source = filepath.read_text(encoding="utf-8")
-        all_identifiers = parser.list_identifiers(source)
 
-        # Filter by wildcard pattern
-        if "*" in identifier or "?" in identifier:
-            matching = [i for i in all_identifiers if fnmatch.fnmatch(i.name, identifier)]
-        else:
-            matching = [i for i in all_identifiers if i.name == identifier]
+        # Let the parser expand the identifier pattern to a list of identifiers.
+        # This allows each parser to handle nested identifiers (e.g., class members)
+        # using language-appropriate syntax.
+        all_identifiers = parser.expand_identifier_pattern(source, identifier)
 
-        if not matching:
+        if not all_identifiers:
             raise ValueError(f"No identifiers matching '{identifier}' found in {path}")
 
         created = []
-        for ident in matching:
+        for ident in all_identifiers:
             ident_hash = compute_hash(ident.source)
 
             # Remove existing entry for this path/identifier if present

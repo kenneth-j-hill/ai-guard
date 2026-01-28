@@ -335,7 +335,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         "targets",
         nargs="+",
         metavar="target",
-        help='File or path:identifier to protect. Supports globs: "src/*.py:func_*" (quote to prevent shell expansion)',
+        help='File or path:identifier to protect. For Python class members use Class.method. Supports globs: "src/*.py:func_*", "file.py:MyClass.*" (quote to prevent shell expansion)',
     )
     add_parser.set_defaults(func=cmd_add)
 
@@ -352,7 +352,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         "targets",
         nargs="*",
         metavar="target",
-        help='File or path:identifier to update. Supports globs: "src/*.py:func_*"',
+        help='File or path:identifier to update. For Python class members use Class.method. Supports globs: "src/*.py:func_*"',
     )
     update_parser.set_defaults(func=cmd_update)
 
@@ -364,7 +364,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         "targets",
         nargs="+",
         metavar="target",
-        help="File path or path:identifier to unprotect",
+        help="File path or path:identifier to unprotect. For Python class members use Class.method",
     )
     remove_parser.set_defaults(func=cmd_remove)
 

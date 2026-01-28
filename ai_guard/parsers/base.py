@@ -4,6 +4,7 @@ To add support for a new language, subclass Parser and implement the
 extract_identifier() and list_identifiers() methods.
 """
 
+import fnmatch
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
@@ -73,6 +74,27 @@ class Parser(ABC):
             A list of all identifiers found in the source.
         """
         pass
+
+    def expand_identifier_pattern(self, source: str, pattern: str) -> list[Identifier]:
+        """Expand an identifier pattern to matching identifiers.
+
+        This method handles wildcards and language-specific nested identifier
+        syntax (e.g., Class.method in Python). Subclasses can override this
+        to support language-specific patterns.
+
+        Args:
+            source: The full source code of the file.
+            pattern: The identifier pattern, possibly with wildcards.
+
+        Returns:
+            A list of matching Identifier objects.
+        """
+        all_identifiers = self.list_identifiers(source)
+
+        if "*" in pattern or "?" in pattern:
+            return [i for i in all_identifiers if fnmatch.fnmatch(i.name, pattern)]
+        else:
+            return [i for i in all_identifiers if i.name == pattern]
 
 
 # Registry of file extensions to parser classes
