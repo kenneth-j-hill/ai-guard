@@ -186,27 +186,31 @@ class GuardFile:
         entry = ProtectedEntry(path=".ai-guard", identifier=None, hash="0" * 16)
         self.entries.insert(0, entry)  # Put it first
 
-    def add_file(self, path: str) -> ProtectedEntry:
+    def add_file(self, path: str) -> tuple[Optional[ProtectedEntry], Optional[ProtectedEntry]]:
         """Add whole-file protection.
 
         Args:
             path: Path to the file (relative to root).
 
         Returns:
-            The created ProtectedEntry.
+            Tuple of (added, skipped). If the entry already exists, added is
+            None and skipped is the existing entry. Otherwise, added is the
+            new entry and skipped is None.
         """
         normalized = normalize_path(path)
         filepath = self.root / normalized
         file_hash = compute_file_hash(filepath)
 
-        # Remove existing entry for this path if present
-        self.entries = [e for e in self.entries if e.path != normalized or e.identifier]
+        # Check for existing entry
+        for entry in self.entries:
+            if entry.path == normalized and entry.identifier is None:
+                return None, entry
 
         entry = ProtectedEntry(path=normalized, identifier=None, hash=file_hash)
         self.entries.append(entry)
-        return entry
+        return entry, None
 
-    def add_identifier(self, path: str, identifier: str) -> list[ProtectedEntry]:
+    def add_identifier(self, path: str, identifier: str) -> tuple[list[ProtectedEntry], list[ProtectedEntry]]:
         """Add identifier protection, supporting wildcards.
 
         Args:
@@ -216,7 +220,8 @@ class GuardFile:
                         depends on the language parser (e.g., Class.method for Python).
 
         Returns:
-            List of created ProtectedEntry objects.
+            Tuple of (added, skipped) lists. Existing entries are skipped
+            rather than overwritten.
         """
         from ai_guard.parsers.base import get_parser_for_file
 
@@ -237,27 +242,32 @@ class GuardFile:
         if not all_identifiers:
             raise ValueError(f"No identifiers matching '{identifier}' found in {path}")
 
-        created = []
+        added = []
+        skipped = []
         for ident in all_identifiers:
+            # Check for existing entry
+            existing = next(
+                (e for e in self.entries
+                 if e.path == normalized and e.identifier == ident.name),
+                None,
+            )
+            if existing:
+                skipped.append(existing)
+                continue
+
             ident_hash = compute_hash(ident.source)
-
-            # Remove existing entry for this path/identifier if present
-            self.entries = [
-                e
-                for e in self.entries
-                if not (e.path == normalized and e.identifier == ident.name)
-            ]
-
             entry = ProtectedEntry(
                 path=normalized, identifier=ident.name, hash=ident_hash
             )
             self.entries.append(entry)
-            created.append(entry)
+            added.append(entry)
 
-        return created
+        return added, skipped
 
     def update(self, path: str, identifier: Optional[str] = None) -> list[ProtectedEntry]:
         """Update the hash for a protected entry.
+
+        Removes existing entries first, then re-adds them with fresh hashes.
 
         Args:
             path: Path to the file.
@@ -266,10 +276,28 @@ class GuardFile:
         Returns:
             List of updated ProtectedEntry objects.
         """
+        normalized = normalize_path(path)
+
         if identifier:
-            return self.add_identifier(path, identifier)
+            # Remove matching entries before re-adding
+            from ai_guard.parsers.base import get_parser_for_file
+
+            parser = get_parser_for_file(str(self.root / normalized))
+            if parser:
+                source = (self.root / normalized).read_text(encoding="utf-8")
+                all_identifiers = parser.expand_identifier_pattern(source, identifier)
+                for ident in all_identifiers:
+                    self.entries = [
+                        e for e in self.entries
+                        if not (e.path == normalized and e.identifier == ident.name)
+                    ]
+            added, _ = self.add_identifier(path, identifier)
+            return added
         else:
-            return [self.add_file(path)]
+            # Remove existing whole-file entry before re-adding
+            self.entries = [e for e in self.entries if e.path != normalized or e.identifier]
+            added, _ = self.add_file(path)
+            return [added]
 
     def remove(self, path: str, identifier: Optional[str] = None) -> int:
         """Remove protection for a file or identifier.

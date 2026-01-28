@@ -19,11 +19,13 @@ class TestWholeFileProtection:
         filepath.write_text("SECRET = 'do-not-change'\n", encoding="utf-8")
 
         guard = GuardFile(temp_project)
-        entry = guard.add_file("config.py")
+        added, skipped = guard.add_file("config.py")
 
-        assert entry.path == "config.py"
-        assert entry.identifier is None
-        assert len(entry.hash) == 16  # SHA-256 truncated to 16 chars
+        assert added is not None
+        assert skipped is None
+        assert added.path == "config.py"
+        assert added.identifier is None
+        assert len(added.hash) == 16  # SHA-256 truncated to 16 chars
 
     def test_file_protection_persists(self, temp_project):
         """File protection is saved to and loaded from .ai-guard file."""
@@ -121,6 +123,26 @@ class TestWholeFileProtection:
         assert count == 1
         assert len(guard.entries) == 0
 
+    def test_add_file_skips_existing(self, temp_project):
+        """Adding a file that is already protected skips it."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 'do-not-change'\n", encoding="utf-8")
+
+        guard = GuardFile(temp_project)
+        added, skipped = guard.add_file("config.py")
+        assert added is not None
+        assert skipped is None
+
+        # Add again - should skip
+        added2, skipped2 = guard.add_file("config.py")
+        assert added2 is None
+        assert skipped2 is not None
+        assert skipped2.path == "config.py"
+
+        # Only one entry should exist
+        file_entries = [e for e in guard.entries if e.path == "config.py"]
+        assert len(file_entries) == 1
+
     def test_path_normalization(self, temp_project):
         """Paths with backslashes are normalized to forward slashes."""
         filepath = temp_project / "subdir" / "config.py"
@@ -129,9 +151,9 @@ class TestWholeFileProtection:
 
         guard = GuardFile(temp_project)
         # Use backslashes like Windows
-        entry = guard.add_file("subdir\\config.py")
+        added, skipped = guard.add_file("subdir\\config.py")
 
-        assert entry.path == "subdir/config.py"
+        assert added.path == "subdir/config.py"
 
 
 class TestSelfProtection:
