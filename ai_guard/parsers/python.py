@@ -107,6 +107,16 @@ class PythonParser(Parser):
     def list_class_members(self, source: str, class_name: str) -> list[Identifier]:
         """List all members of a specific class.
 
+        If multiple classes share the same name, only the first is used.
+        This can happen with conditional definitions, e.g.::
+
+            if sys.platform == "win32":
+                class FileHandler:
+                    ...
+            else:
+                class FileHandler:
+                    ...
+
         Args:
             source: The full source code of the file.
             class_name: Name of the class to list members for.
@@ -138,7 +148,11 @@ class PythonParser(Parser):
         return identifiers
 
     def _get_node_name(self, node: ast.AST) -> Optional[str]:
-        """Get the name of an AST node if it has one."""
+        """Get the name of an AST node if it has one.
+
+        Only handles simple assignment targets (single name on the left side).
+        Tuple unpacking and augmented assignments are intentionally skipped.
+        """
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             return node.name
         elif isinstance(node, ast.Assign):
