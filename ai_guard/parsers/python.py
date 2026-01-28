@@ -41,7 +41,7 @@ class PythonParser(Parser):
             return self._extract_class_member(tree, name, lines)
 
         for node in ast.walk(tree):
-            identifier = self._node_to_identifier(node, name, lines, source)
+            identifier = self._node_to_identifier(node, name, lines)
             if identifier:
                 return identifier
 
@@ -74,7 +74,7 @@ class PythonParser(Parser):
                 # Search within the class body
                 for member in node.body:
                     identifier = self._node_to_identifier(
-                        member, member_name, lines, None, qualified_name=dotted_name
+                        member, member_name, lines, qualified_name=dotted_name
                     )
                     if identifier:
                         return identifier
@@ -98,7 +98,7 @@ class PythonParser(Parser):
         identifiers = []
 
         for node in ast.iter_child_nodes(tree):
-            identifier = self._node_to_identifier(node, None, lines, source)
+            identifier = self._node_to_identifier(node, None, lines)
             if identifier:
                 identifiers.append(identifier)
 
@@ -129,7 +129,7 @@ class PythonParser(Parser):
                     qualified_name = f"{class_name}.{self._get_node_name(member)}"
                     if self._get_node_name(member):
                         identifier = self._node_to_identifier(
-                            member, None, lines, None, qualified_name=qualified_name
+                            member, None, lines, qualified_name=qualified_name
                         )
                         if identifier:
                             identifiers.append(identifier)
@@ -188,7 +188,6 @@ class PythonParser(Parser):
         node: ast.AST,
         target_name: Optional[str],
         lines: list[str],
-        source: Optional[str],
         qualified_name: Optional[str] = None,
     ) -> Optional[Identifier]:
         """Convert an AST node to an Identifier if it matches.
@@ -197,7 +196,6 @@ class PythonParser(Parser):
             node: The AST node to check.
             target_name: The name to match, or None to match any.
             lines: Source code split into lines.
-            source: The full source code (unused, kept for compatibility).
             qualified_name: If provided, use this as the identifier name instead
                            of the node's name. Used for class members.
 
