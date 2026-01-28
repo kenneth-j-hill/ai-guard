@@ -16,44 +16,44 @@ class TestIdentifierProtection:
     def test_protect_function(self, temp_project, sample_python_file):
         """Protecting a function includes its entire definition."""
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("sample.py", "simple_function")
+        added, skipped = guard.add_identifier("sample.py", "simple_function")
 
-        assert len(entries) == 1
-        assert entries[0].path == "sample.py"
-        assert entries[0].identifier == "simple_function"
-        assert len(entries[0].hash) == 16
+        assert len(added) == 1
+        assert added[0].path == "sample.py"
+        assert added[0].identifier == "simple_function"
+        assert len(added[0].hash) == 16
 
     def test_protect_class(self, temp_project, sample_python_file):
         """Protecting a class includes the entire class body."""
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("sample.py", "SimpleClass")
+        added, skipped = guard.add_identifier("sample.py", "SimpleClass")
 
-        assert len(entries) == 1
-        assert entries[0].identifier == "SimpleClass"
+        assert len(added) == 1
+        assert added[0].identifier == "SimpleClass"
 
     def test_protect_async_function(self, temp_project, sample_python_file):
         """Async functions can be protected."""
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("sample.py", "async_function")
+        added, skipped = guard.add_identifier("sample.py", "async_function")
 
-        assert len(entries) == 1
-        assert entries[0].identifier == "async_function"
+        assert len(added) == 1
+        assert added[0].identifier == "async_function"
 
     def test_protect_module_constant(self, temp_project, sample_python_file):
         """Module-level constants can be protected."""
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("sample.py", "MODULE_CONSTANT")
+        added, skipped = guard.add_identifier("sample.py", "MODULE_CONSTANT")
 
-        assert len(entries) == 1
-        assert entries[0].identifier == "MODULE_CONSTANT"
+        assert len(added) == 1
+        assert added[0].identifier == "MODULE_CONSTANT"
 
     def test_protect_annotated_variable(self, temp_project, sample_python_file):
         """Annotated variables can be protected."""
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("sample.py", "annotated_var")
+        added, skipped = guard.add_identifier("sample.py", "annotated_var")
 
-        assert len(entries) == 1
-        assert entries[0].identifier == "annotated_var"
+        assert len(added) == 1
+        assert added[0].identifier == "annotated_var"
 
     def test_verify_unchanged_identifier_passes(self, temp_project, sample_python_file):
         """Verification passes when a protected identifier hasn't changed."""
@@ -106,6 +106,35 @@ class TestIdentifierProtection:
         assert len(failures) == 1
         assert failures[0][1] == "identifier not found"
 
+    def test_add_identifier_skips_existing(self, temp_project, sample_python_file):
+        """Adding an identifier that is already protected skips it."""
+        guard = GuardFile(temp_project)
+        added, skipped = guard.add_identifier("sample.py", "simple_function")
+        assert len(added) == 1
+        assert len(skipped) == 0
+
+        # Add again - should skip
+        added2, skipped2 = guard.add_identifier("sample.py", "simple_function")
+        assert len(added2) == 0
+        assert len(skipped2) == 1
+        assert skipped2[0].identifier == "simple_function"
+
+        # Only one entry should exist
+        func_entries = [e for e in guard.entries if e.identifier == "simple_function"]
+        assert len(func_entries) == 1
+
+    def test_add_wildcard_skips_existing(self, temp_project, sample_python_file):
+        """Adding with a wildcard skips already-protected identifiers."""
+        guard = GuardFile(temp_project)
+        # Protect one first
+        guard.add_identifier("sample.py", "test_invariant_one")
+
+        # Now add all with wildcard - should skip the one already protected
+        added, skipped = guard.add_identifier("sample.py", "test_invariant_*")
+        assert len(added) == 2
+        assert len(skipped) == 1
+        assert skipped[0].identifier == "test_invariant_one"
+
     def test_nonexistent_identifier_raises(self, temp_project, sample_python_file):
         """Adding protection for a nonexistent identifier raises an error."""
         guard = GuardFile(temp_project)
@@ -132,8 +161,8 @@ class TestDecoratedIdentifiers:
     def test_decorated_function_includes_decorator(self, temp_project, sample_python_file):
         """A decorated function's hash includes its decorator."""
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("sample.py", "decorated_function")
-        original_hash = entries[0].hash
+        added, _ = guard.add_identifier("sample.py", "decorated_function")
+        original_hash = added[0].hash
 
         # Modify the decorator
         content = sample_python_file.read_text()
@@ -149,8 +178,8 @@ class TestDecoratedIdentifiers:
     def test_multi_decorated_function(self, temp_project, sample_python_file):
         """Functions with multiple decorators include all decorators in hash."""
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("sample.py", "multi_decorated")
-        original_hash = entries[0].hash
+        added, _ = guard.add_identifier("sample.py", "multi_decorated")
+        original_hash = added[0].hash
 
         # Remove one decorator
         content = sample_python_file.read_text()
@@ -170,28 +199,28 @@ class TestClassMemberProtection:
     def test_protect_class_method(self, temp_project, sample_python_file):
         """A method within a class can be protected using dot notation."""
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("sample.py", "SimpleClass.method")
+        added, skipped = guard.add_identifier("sample.py", "SimpleClass.method")
 
-        assert len(entries) == 1
-        assert entries[0].path == "sample.py"
-        assert entries[0].identifier == "SimpleClass.method"
-        assert len(entries[0].hash) == 16
+        assert len(added) == 1
+        assert added[0].path == "sample.py"
+        assert added[0].identifier == "SimpleClass.method"
+        assert len(added[0].hash) == 16
 
     def test_protect_decorated_method(self, temp_project, sample_python_file):
         """A decorated method includes its decorator in the hash."""
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("sample.py", "DecoratedClass.prop")
+        added, _ = guard.add_identifier("sample.py", "DecoratedClass.prop")
 
-        assert len(entries) == 1
-        assert entries[0].identifier == "DecoratedClass.prop"
+        assert len(added) == 1
+        assert added[0].identifier == "DecoratedClass.prop"
 
     def test_protect_static_method(self, temp_project, sample_python_file):
         """Static methods can be protected."""
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("sample.py", "DecoratedClass.static_method")
+        added, _ = guard.add_identifier("sample.py", "DecoratedClass.static_method")
 
-        assert len(entries) == 1
-        assert entries[0].identifier == "DecoratedClass.static_method"
+        assert len(added) == 1
+        assert added[0].identifier == "DecoratedClass.static_method"
 
     def test_verify_unchanged_method_passes(self, temp_project, sample_python_file):
         """Verification passes when a protected method hasn't changed."""
@@ -221,21 +250,21 @@ class TestClassMemberProtection:
     def test_protect_all_class_members_with_wildcard(self, temp_project, sample_python_file):
         """Wildcard can protect all members of a class."""
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("sample.py", "DecoratedClass.*")
+        added, skipped = guard.add_identifier("sample.py", "DecoratedClass.*")
 
         # Should match prop and static_method
-        assert len(entries) == 2
-        names = {e.identifier for e in entries}
+        assert len(added) == 2
+        names = {e.identifier for e in added}
         assert "DecoratedClass.prop" in names
         assert "DecoratedClass.static_method" in names
 
     def test_protect_specific_members_with_wildcard(self, temp_project, sample_python_file):
         """Wildcard patterns filter class members."""
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("sample.py", "DecoratedClass.static_*")
+        added, _ = guard.add_identifier("sample.py", "DecoratedClass.static_*")
 
-        assert len(entries) == 1
-        assert entries[0].identifier == "DecoratedClass.static_method"
+        assert len(added) == 1
+        assert added[0].identifier == "DecoratedClass.static_method"
 
     def test_nonexistent_class_member_raises(self, temp_project, sample_python_file):
         """Adding protection for a nonexistent class member raises an error."""
@@ -254,8 +283,8 @@ class TestClassMemberProtection:
     def test_decorated_method_hash_includes_decorator(self, temp_project, sample_python_file):
         """Changing a method's decorator changes its hash."""
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("sample.py", "DecoratedClass.prop")
-        original_hash = entries[0].hash
+        added, _ = guard.add_identifier("sample.py", "DecoratedClass.prop")
+        original_hash = added[0].hash
 
         # Modify the decorator
         content = sample_python_file.read_text()

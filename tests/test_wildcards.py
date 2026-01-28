@@ -16,20 +16,20 @@ class TestWildcardPatterns:
     def test_asterisk_matches_multiple(self, temp_project, sample_python_file):
         """The * wildcard matches multiple identifiers."""
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("sample.py", "test_invariant_*")
+        added, skipped = guard.add_identifier("sample.py", "test_invariant_*")
 
         # Should match test_invariant_one, test_invariant_two, test_invariant_three
-        assert len(entries) == 3
-        names = {e.identifier for e in entries}
+        assert len(added) == 3
+        names = {e.identifier for e in added}
         assert names == {"test_invariant_one", "test_invariant_two", "test_invariant_three"}
 
     def test_each_match_gets_own_hash(self, temp_project, sample_python_file):
         """Each matched identifier gets its own hash."""
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("sample.py", "test_invariant_*")
+        added, _ = guard.add_identifier("sample.py", "test_invariant_*")
 
         # Each should have a different hash (they have different content)
-        hashes = {e.hash for e in entries}
+        hashes = {e.hash for e in added}
         assert len(hashes) == 3
 
     def test_wildcard_no_matches_raises(self, temp_project, sample_python_file):
@@ -55,11 +55,11 @@ def func_ab():
         filepath.write_text(source, encoding="utf-8")
 
         guard = GuardFile(temp_project)
-        entries = guard.add_identifier("funcs.py", "func_?")
+        added, skipped = guard.add_identifier("funcs.py", "func_?")
 
         # Should match func_a and func_b, but not func_ab
-        assert len(entries) == 2
-        names = {e.identifier for e in entries}
+        assert len(added) == 2
+        names = {e.identifier for e in added}
         assert names == {"func_a", "func_b"}
 
     def test_wildcard_entries_saved_individually(self, temp_project, sample_python_file):

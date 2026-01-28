@@ -120,14 +120,19 @@ def cmd_add(args: argparse.Namespace) -> int:
         for path, identifier in expand_glob_target(root, target):
             try:
                 if identifier:
-                    entries = guard.add_identifier(path, identifier)
-                    for entry in entries:
+                    added, skipped = guard.add_identifier(path, identifier)
+                    for entry in added:
                         print(f"Protected {entry.path}:{entry.identifier} ({entry.hash})")
                         any_success = True
+                    for entry in skipped:
+                        print(f"Already protected: {entry.path}:{entry.identifier} ({entry.hash})")
                 else:
-                    entry = guard.add_file(path)
-                    print(f"Protected {entry.path} ({entry.hash})")
-                    any_success = True
+                    added, skipped = guard.add_file(path)
+                    if added:
+                        print(f"Protected {added.path} ({added.hash})")
+                        any_success = True
+                    if skipped:
+                        print(f"Already protected: {skipped.path} ({skipped.hash})")
             except FileNotFoundError:
                 print(f"Error: File not found: {path}", file=sys.stderr)
                 any_error = True
