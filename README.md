@@ -200,6 +200,8 @@ Format:
 - `path:Class.member:hash` - Python class member
 - `path:Struct::member:hash` - C/C++ struct/class member
 
+The colon (`:`) is used as a delimiter, so file paths containing colons are not supported. This is consistent with Git, which also uses colons as delimiters in path specifications.
+
 ## What Gets Hashed
 
 For **files**: the entire file content.
