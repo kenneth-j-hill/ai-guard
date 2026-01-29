@@ -240,7 +240,13 @@ The critical step is preventing the AI from running `ai-guard update` or `ai-gua
 
 #### Claude Code
 
-Add to `.claude/settings.json`:
+Add the following to your project `CLAUDE.md` (or your global `~/.claude/CLAUDE.md`):
+
+```
+NEVER modify, delete, or overwrite any file named `.ai-guard`. NEVER run `ai-guard update` or `ai-guard remove`.
+```
+
+Then add permission denials to `.claude/settings.json` as a secondary safeguard:
 
 ```json
 {
@@ -255,9 +261,15 @@ Add to `.claude/settings.json`:
 }
 ```
 
+The `CLAUDE.md` instruction is the primary protection because it works regardless of OS, shell, or tool availability. The permission denials provide defense-in-depth.
+
 #### Other AI tools
 
-Configure your AI tool to deny commands matching:
+Add a prohibition statement to the AI tool's system prompt or project instructions:
+
+> NEVER modify, delete, or overwrite any file named `.ai-guard`. NEVER run `ai-guard update` or `ai-guard remove`.
+
+If the tool supports permission denials, also block commands matching:
 - `ai-guard update`
 - `ai-guard remove`
 - Direct writes to `.ai-guard`
