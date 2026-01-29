@@ -373,3 +373,103 @@ class TestListCommand:
         captured = capsys.readouterr()
         assert "sample.py" in captured.out
         assert "simple_function" in captured.out
+
+
+class TestQuietOption:
+    """Tests for the --quiet / -q flag."""
+
+    def test_add_quiet_no_stdout(self, temp_project, monkeypatch, capsys):
+        """'ai-guard -q add file.py' produces no stdout."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        result = main(["-q", "add", "config.py"])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_add_quiet_still_protects(self, temp_project, monkeypatch):
+        """'-q add' still writes the .ai-guard file."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        main(["-q", "add", "config.py"])
+
+        assert (temp_project / ".ai-guard").exists()
+        content = (temp_project / ".ai-guard").read_text()
+        assert "config.py" in content
+
+    def test_verify_quiet_success(self, temp_project, monkeypatch, capsys):
+        """'-q verify' produces no stdout on success."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        main(["add", "config.py"])
+        capsys.readouterr()  # clear add output
+
+        result = main(["-q", "verify"])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_verify_quiet_failure_still_shows_stderr(self, temp_project, monkeypatch, capsys):
+        """'-q verify' still prints errors to stderr on failure."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        main(["add", "config.py"])
+        filepath.write_text("SECRET = 99\n", encoding="utf-8")
+        capsys.readouterr()  # clear add output
+
+        result = main(["-q", "verify"])
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "config.py" in captured.err
+
+    def test_list_quiet(self, temp_project, sample_python_file, monkeypatch, capsys):
+        """'-q list' suppresses list output."""
+        monkeypatch.chdir(temp_project)
+        main(["add", "sample.py"])
+        capsys.readouterr()  # clear add output
+
+        result = main(["-q", "list"])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_verify_quiet_failure_shows_violation_details(self, temp_project, monkeypatch, capsys):
+        """'-q verify' shows full violation details on stderr."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        main(["add", "config.py"])
+        filepath.write_text("SECRET = 99\n", encoding="utf-8")
+        capsys.readouterr()  # clear add output
+
+        result = main(["-q", "verify"])
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "AI-Guard violations found:" in captured.err
+        assert "config.py" in captured.err
+
+    def test_add_quiet_error_still_shows_stderr(self, temp_project, monkeypatch, capsys):
+        """'-q add nonexistent.py' still prints errors to stderr."""
+        monkeypatch.chdir(temp_project)
+        result = main(["-q", "add", "nonexistent.py"])
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "Error" in captured.err

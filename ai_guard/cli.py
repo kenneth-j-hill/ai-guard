@@ -8,6 +8,16 @@ from typing import Optional
 from ai_guard.core import GuardFile
 
 
+# Module-level quiet flag, set by main() before dispatching to commands.
+_quiet = False
+
+
+def qprint(*args, **kwargs) -> None:
+    """Print to stdout unless quiet mode is active."""
+    if not _quiet:
+        print(*args, **kwargs)
+
+
 def find_project_root(start: Optional[Path] = None) -> Path:
     """Find the project root by looking for .git directory.
 
@@ -122,17 +132,17 @@ def cmd_add(args: argparse.Namespace) -> int:
                 if identifier:
                     added, skipped = guard.add_identifier(path, identifier)
                     for entry in added:
-                        print(f"Protected {entry.path}:{entry.identifier} ({entry.hash})")
+                        qprint(f"Protected {entry.path}:{entry.identifier} ({entry.hash})")
                         any_success = True
                     for entry in skipped:
-                        print(f"Already protected: {entry.path}:{entry.identifier} ({entry.hash})")
+                        qprint(f"Already protected: {entry.path}:{entry.identifier} ({entry.hash})")
                 else:
                     added, skipped = guard.add_file(path)
                     if added:
-                        print(f"Protected {added.path} ({added.hash})")
+                        qprint(f"Protected {added.path} ({added.hash})")
                         any_success = True
                     if skipped:
-                        print(f"Already protected: {skipped.path} ({skipped.hash})")
+                        qprint(f"Already protected: {skipped.path} ({skipped.hash})")
             except FileNotFoundError:
                 print(f"Error: File not found: {path}", file=sys.stderr)
                 any_error = True
@@ -165,7 +175,7 @@ def cmd_update(args: argparse.Namespace) -> int:
         # Update all existing entries
         existing_entries = guard.list_entries()
         if not existing_entries:
-            print("No protected entries to update")
+            qprint("No protected entries to update")
             return 0
 
         for entry in existing_entries:
@@ -179,9 +189,9 @@ def cmd_update(args: argparse.Namespace) -> int:
                 for upd in updated:
                     if upd.hash != old_hash:
                         if upd.identifier:
-                            print(f"Updated {upd.path}:{upd.identifier} ({upd.hash})")
+                            qprint(f"Updated {upd.path}:{upd.identifier} ({upd.hash})")
                         else:
-                            print(f"Updated {upd.path} ({upd.hash})")
+                            qprint(f"Updated {upd.path} ({upd.hash})")
                     any_success = True
             except FileNotFoundError:
                 print(f"Error: File not found: {entry.path}", file=sys.stderr)
@@ -196,9 +206,9 @@ def cmd_update(args: argparse.Namespace) -> int:
                     entries = guard.update(path, identifier)
                     for entry in entries:
                         if entry.identifier:
-                            print(f"Updated {entry.path}:{entry.identifier} ({entry.hash})")
+                            qprint(f"Updated {entry.path}:{entry.identifier} ({entry.hash})")
                         else:
-                            print(f"Updated {entry.path} ({entry.hash})")
+                            qprint(f"Updated {entry.path} ({entry.hash})")
                         any_success = True
                 except FileNotFoundError:
                     print(f"Error: File not found: {path}", file=sys.stderr)
@@ -226,10 +236,10 @@ def cmd_remove(args: argparse.Namespace) -> int:
 
     if total_count > 0:
         guard.save()
-        print(f"Removed {total_count} protection(s)")
+        qprint(f"Removed {total_count} protection(s)")
         return 0
     else:
-        print("No matching protections found", file=sys.stderr)
+        print("No matching protections found", file=sys.stderr)  # stderr, not qprint
         return 1
 
 
@@ -240,14 +250,14 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     entries = guard.list_entries()
     if not entries:
-        print("No protected entries")
+        qprint("No protected entries")
         return 0
 
     for entry in entries:
         if entry.identifier:
-            print(f"{entry.path}:{entry.identifier} ({entry.hash})")
+            qprint(f"{entry.path}:{entry.identifier} ({entry.hash})")
         else:
-            print(f"{entry.path} ({entry.hash})")
+            qprint(f"{entry.path} ({entry.hash})")
 
     return 0
 
@@ -260,7 +270,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     failures = guard.verify()
 
     if not failures:
-        print("All protected code verified successfully")
+        qprint("All protected code verified successfully")
         return 0
 
     print("AI-Guard violations found:", file=sys.stderr)
@@ -301,19 +311,19 @@ fi
     if hook_path.exists():
         existing = hook_path.read_text(encoding="utf-8")
         if "ai-guard" in existing:
-            print("ai-guard hook already installed")
+            qprint("ai-guard hook already installed")
             return 0
         else:
             # Append to existing hook
             hook_content = existing.rstrip() + "\n\n" + hook_content
-            print("Appending ai-guard to existing pre-commit hook")
+            qprint("Appending ai-guard to existing pre-commit hook")
     else:
-        print("Installing pre-commit hook")
+        qprint("Installing pre-commit hook")
 
     hook_path.write_text(hook_content, encoding="utf-8")
     hook_path.chmod(0o755)
 
-    print(f"Hook installed at {hook_path}")
+    qprint(f"Hook installed at {hook_path}")
     return 0
 
 
@@ -328,6 +338,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--version",
         action="version",
         version=f"%(prog)s {__import__('ai_guard').__version__}",
+    )
+    parser.add_argument(
+        "-q", "--quiet",
+        action="store_true",
+        help="Suppress all non-error output",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -388,6 +403,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     install_parser.set_defaults(func=cmd_install_hook)
 
     args = parser.parse_args(argv)
+    global _quiet
+    _quiet = args.quiet
     return args.func(args)
 
 
