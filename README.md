@@ -183,6 +183,29 @@ Check all protected code for modifications. Returns exit code 1 if any protected
 
 Install a git pre-commit hook that runs `ai-guard verify` before each commit.
 
+## Global Options
+
+### `--porcelain`
+
+Produce machine-readable output. Each affected entry is printed as a bare `path` or `path:identifier`, one per line, with no hashes, prefixes, or summary messages. This makes it easy to pipe output to other commands with `xargs`.
+
+```bash
+# List all protected entries as bare targets
+ai-guard --porcelain list
+
+# Remove all guards for files/identifiers that no longer exist
+ai-guard --porcelain verify | xargs ai-guard remove
+
+# See what was added
+ai-guard --porcelain add "src/*.py:test_*"
+```
+
+`--porcelain` implies `--quiet` (all human-readable output is suppressed). For `verify`, failures are printed to stdout (not stderr) so they can be piped.
+
+### `-q, --quiet`
+
+Suppress all non-error output. Errors are still printed to stderr.
+
 ## The `.ai-guard` File
 
 Protection entries are stored in `.ai-guard` at the project root:

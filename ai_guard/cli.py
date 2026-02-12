@@ -8,14 +8,26 @@ from typing import Optional
 from ai_guard.core import GuardFile
 
 
-# Module-level quiet flag, set by main() before dispatching to commands.
+# Module-level flags, set by main() before dispatching to commands.
 _quiet = False
+_porcelain = False
 
 
 def qprint(*args, **kwargs) -> None:
     """Print to stdout unless quiet mode is active."""
     if not _quiet:
         print(*args, **kwargs)
+
+
+def pprint(line: str) -> None:
+    """Print a porcelain-format line (only when porcelain mode is active)."""
+    if _porcelain:
+        print(line)
+
+
+def entry_target(entry) -> str:
+    """Format an entry as a bare target string for porcelain output."""
+    return f"{entry.path}:{entry.identifier}" if entry.identifier else entry.path
 
 
 def find_project_root(start: Optional[Path] = None) -> Path:
@@ -133,6 +145,7 @@ def cmd_add(args: argparse.Namespace) -> int:
                     added, skipped = guard.add_identifier(path, identifier)
                     for entry in added:
                         qprint(f"Protected {entry.path}:{entry.identifier} ({entry.hash})")
+                        pprint(entry_target(entry))
                         any_success = True
                     for entry in skipped:
                         qprint(f"Already protected: {entry.path}:{entry.identifier} ({entry.hash})")
@@ -140,6 +153,7 @@ def cmd_add(args: argparse.Namespace) -> int:
                     added, skipped = guard.add_file(path)
                     if added:
                         qprint(f"Protected {added.path} ({added.hash})")
+                        pprint(entry_target(added))
                         any_success = True
                     if skipped:
                         qprint(f"Already protected: {skipped.path} ({skipped.hash})")
@@ -192,6 +206,7 @@ def cmd_update(args: argparse.Namespace) -> int:
                             qprint(f"Updated {upd.path}:{upd.identifier} ({upd.hash})")
                         else:
                             qprint(f"Updated {upd.path} ({upd.hash})")
+                        pprint(entry_target(upd))
                     any_success = True
             except FileNotFoundError:
                 print(f"Error: File not found: {entry.path}", file=sys.stderr)
@@ -209,6 +224,7 @@ def cmd_update(args: argparse.Namespace) -> int:
                             qprint(f"Updated {entry.path}:{entry.identifier} ({entry.hash})")
                         else:
                             qprint(f"Updated {entry.path} ({entry.hash})")
+                        pprint(entry_target(entry))
                         any_success = True
                 except FileNotFoundError:
                     print(f"Error: File not found: {path}", file=sys.stderr)
@@ -228,15 +244,17 @@ def cmd_remove(args: argparse.Namespace) -> int:
     root = find_project_root()
     guard = GuardFile(root)
 
-    total_count = 0
+    all_removed = []
     for target in args.targets:
         for path, identifier in expand_glob_target(root, target):
-            count = guard.remove(path, identifier)
-            total_count += count
+            removed = guard.remove(path, identifier)
+            all_removed.extend(removed)
 
-    if total_count > 0:
+    if all_removed:
         guard.save()
-        qprint(f"Removed {total_count} protection(s)")
+        qprint(f"Removed {len(all_removed)} protection(s)")
+        for entry in all_removed:
+            pprint(entry_target(entry))
         return 0
     else:
         print("No matching protections found", file=sys.stderr)  # stderr, not qprint
@@ -254,7 +272,9 @@ def cmd_list(args: argparse.Namespace) -> int:
         return 0
 
     for entry in entries:
-        if entry.identifier:
+        if _porcelain:
+            pprint(entry_target(entry))
+        elif entry.identifier:
             qprint(f"{entry.path}:{entry.identifier} ({entry.hash})")
         else:
             qprint(f"{entry.path} ({entry.hash})")
@@ -273,12 +293,16 @@ def cmd_verify(args: argparse.Namespace) -> int:
         qprint("All protected code verified successfully")
         return 0
 
-    print("AI-Guard violations found:", file=sys.stderr)
-    for entry, reason in failures:
-        if entry.identifier:
-            print(f"  {entry.path}:{entry.identifier} - {reason}", file=sys.stderr)
-        else:
-            print(f"  {entry.path} - {reason}", file=sys.stderr)
+    if _porcelain:
+        for entry, reason in failures:
+            pprint(entry_target(entry))
+    else:
+        print("AI-Guard violations found:", file=sys.stderr)
+        for entry, reason in failures:
+            if entry.identifier:
+                print(f"  {entry.path}:{entry.identifier} - {reason}", file=sys.stderr)
+            else:
+                print(f"  {entry.path} - {reason}", file=sys.stderr)
 
     return 1
 
@@ -344,6 +368,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         action="store_true",
         help="Suppress all non-error output",
     )
+    parser.add_argument(
+        "--porcelain",
+        action="store_true",
+        help="Produce machine-readable output (one entry per line, no decoration)",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -403,8 +432,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     install_parser.set_defaults(func=cmd_install_hook)
 
     args = parser.parse_args(argv)
-    global _quiet
-    _quiet = args.quiet
+    global _quiet, _porcelain
+    _porcelain = args.porcelain
+    _quiet = args.quiet or _porcelain  # porcelain implies quiet
     return args.func(args)
 
 

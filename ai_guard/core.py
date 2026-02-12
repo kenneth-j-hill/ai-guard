@@ -299,7 +299,7 @@ class GuardFile:
             added, _ = self.add_file(path)
             return [added]
 
-    def remove(self, path: str, identifier: Optional[str] = None) -> int:
+    def remove(self, path: str, identifier: Optional[str] = None) -> list[ProtectedEntry]:
         """Remove protection for a file or identifier.
 
         Args:
@@ -307,24 +307,18 @@ class GuardFile:
             identifier: Optional identifier name.
 
         Returns:
-            Number of entries removed.
+            List of removed entries.
         """
         normalized = normalize_path(path)
-        original_count = len(self.entries)
 
         if identifier:
-            self.entries = [
-                e
-                for e in self.entries
-                if not (e.path == normalized and e.identifier == identifier)
-            ]
+            removed = [e for e in self.entries if e.path == normalized and e.identifier == identifier]
+            self.entries = [e for e in self.entries if e not in removed]
         else:
-            # Remove whole-file entry
-            self.entries = [
-                e for e in self.entries if not (e.path == normalized and not e.identifier)
-            ]
+            removed = [e for e in self.entries if e.path == normalized and not e.identifier]
+            self.entries = [e for e in self.entries if e not in removed]
 
-        return original_count - len(self.entries)
+        return removed
 
     def verify(self) -> list[tuple[ProtectedEntry, str]]:
         """Verify all protected entries.

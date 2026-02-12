@@ -473,3 +473,132 @@ class TestQuietOption:
         captured = capsys.readouterr()
         assert captured.out == ""
         assert "Error" in captured.err
+
+
+class TestPorcelainOption:
+    """Tests for the --porcelain flag."""
+
+    def test_list_porcelain(self, temp_project, sample_python_file, monkeypatch, capsys):
+        """'--porcelain list' outputs bare entries without hashes."""
+        monkeypatch.chdir(temp_project)
+        main(["add", "sample.py"])
+        main(["add", "sample.py:simple_function"])
+        capsys.readouterr()  # clear add output
+
+        result = main(["--porcelain", "list"])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        lines = captured.out.strip().splitlines()
+        # Should have entries for .ai-guard, sample.py, and sample.py:simple_function
+        assert any(line == "sample.py" for line in lines)
+        assert any(line == "sample.py:simple_function" for line in lines)
+        # No hashes in output
+        assert "(" not in captured.out
+
+    def test_list_porcelain_suppresses_human_text(self, temp_project, monkeypatch, capsys):
+        """'--porcelain list' with no entries produces no output."""
+        monkeypatch.chdir(temp_project)
+        result = main(["--porcelain", "list"])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_verify_porcelain_failures_on_stdout(self, temp_project, monkeypatch, capsys):
+        """'--porcelain verify' outputs failing entries to stdout, not stderr."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        main(["add", "config.py"])
+        filepath.write_text("SECRET = 99\n", encoding="utf-8")
+        capsys.readouterr()
+
+        result = main(["--porcelain", "verify"])
+
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "config.py" in captured.out
+        assert captured.err == ""
+
+    def test_verify_porcelain_no_failures(self, temp_project, monkeypatch, capsys):
+        """'--porcelain verify' with no failures produces no output."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        main(["add", "config.py"])
+        capsys.readouterr()
+
+        result = main(["--porcelain", "verify"])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_add_porcelain(self, temp_project, sample_python_file, monkeypatch, capsys):
+        """'--porcelain add' outputs only newly added entries."""
+        monkeypatch.chdir(temp_project)
+        result = main(["--porcelain", "add", "sample.py:simple_function"])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert captured.out.strip() == "sample.py:simple_function"
+
+    def test_add_porcelain_skips_already_protected(self, temp_project, monkeypatch, capsys):
+        """'--porcelain add' does not output already-protected entries."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        main(["add", "config.py"])
+        capsys.readouterr()
+
+        result = main(["--porcelain", "add", "config.py"])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_update_porcelain(self, temp_project, monkeypatch, capsys):
+        """'--porcelain update' outputs updated entries."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        main(["add", "config.py"])
+        filepath.write_text("SECRET = 99\n", encoding="utf-8")
+        capsys.readouterr()
+
+        result = main(["--porcelain", "update", "config.py"])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert captured.out.strip() == "config.py"
+
+    def test_remove_porcelain(self, temp_project, sample_python_file, monkeypatch, capsys):
+        """'--porcelain remove' outputs each removed entry."""
+        monkeypatch.chdir(temp_project)
+        main(["add", "sample.py:simple_function"])
+        capsys.readouterr()
+
+        result = main(["--porcelain", "remove", "sample.py:simple_function"])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        assert captured.out.strip() == "sample.py:simple_function"
+
+    def test_porcelain_implies_quiet(self, temp_project, monkeypatch, capsys):
+        """'--porcelain' suppresses human-readable output (implies --quiet)."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        result = main(["--porcelain", "add", "config.py"])
+
+        assert result == 0
+        captured = capsys.readouterr()
+        # Should have porcelain output but no "Protected" prefix
+        assert "Protected" not in captured.out
+        assert "config.py" in captured.out
