@@ -303,6 +303,31 @@ With bypass commands blocked, the AI cannot resolve protection violations, and t
 
 - **Python** - Full support via the built-in `ast` module
 - **C/C++** - Support via regex-based parsing (GCC/G++)
+- **Rust** - Full support via tree-sitter (optional dependency)
+
+### Rust Support
+
+Rust parsing requires optional dependencies. Install with:
+
+```bash
+pip install ai-guard[rust]
+# or
+pipx install ai-guard[rust]
+```
+
+Then use it like any other language:
+
+```bash
+ai-guard add src/main.rs                      # Whole file
+ai-guard add src/lib.rs:process_data           # Function
+ai-guard add src/lib.rs:Config                 # Struct
+ai-guard add src/lib.rs:Config::max_size       # Struct field
+ai-guard add src/lib.rs:Config::new            # Impl method
+ai-guard add src/lib.rs:Config::*              # All fields + impl methods
+ai-guard add src/lib.rs:Color::Red             # Enum variant
+```
+
+Supported Rust identifiers: `fn`, `struct`, `enum`, `trait`, `impl`, `const`, `static`, `type`, `macro_rules!`, `mod`.
 
 ## Adding Language Support
 

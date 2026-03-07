@@ -3,5 +3,6 @@
 from ai_guard.parsers.base import Parser, Identifier
 from ai_guard.parsers.python import PythonParser
 from ai_guard.parsers.gcc import GCCParser, GPPParser
+from ai_guard.parsers.rust import RustParser
 
-__all__ = ["Parser", "Identifier", "PythonParser", "GCCParser", "GPPParser"]
+__all__ = ["Parser", "Identifier", "PythonParser", "GCCParser", "GPPParser", "RustParser"]

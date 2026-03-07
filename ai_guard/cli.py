@@ -74,7 +74,7 @@ def parse_target(target: str) -> tuple[str, Optional[str]]:
     # Look for known file extensions followed by colon, or glob patterns ending
     # in a known extension followed by colon (e.g., "*.py:" or "test_*.py:")
     import re
-    extensions = r"\.(?:py|pyw|js|jsx|ts|tsx|cpp|c|h|hpp|cc|cxx|hxx)"
+    extensions = r"\.(?:py|pyw|js|jsx|ts|tsx|cpp|c|h|hpp|cc|cxx|hxx|rs)"
     # Match extension (possibly followed by glob chars) then colon
     match = re.search(rf"({extensions}):", target)
     if match:
@@ -160,6 +160,9 @@ def cmd_add(args: argparse.Namespace) -> int:
             except FileNotFoundError:
                 print(f"Error: File not found: {path}", file=sys.stderr)
                 any_error = True
+            except ImportError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                any_error = True
             except ValueError as e:
                 print(f"Error: {e}", file=sys.stderr)
                 any_error = True
@@ -211,6 +214,9 @@ def cmd_update(args: argparse.Namespace) -> int:
             except FileNotFoundError:
                 print(f"Error: File not found: {entry.path}", file=sys.stderr)
                 any_error = True
+            except ImportError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                any_error = True
             except ValueError as e:
                 print(f"Error: {e}", file=sys.stderr)
                 any_error = True
@@ -228,6 +234,9 @@ def cmd_update(args: argparse.Namespace) -> int:
                         any_success = True
                 except FileNotFoundError:
                     print(f"Error: File not found: {path}", file=sys.stderr)
+                    any_error = True
+                except ImportError as e:
+                    print(f"Error: {e}", file=sys.stderr)
                     any_error = True
                 except ValueError as e:
                     print(f"Error: {e}", file=sys.stderr)
@@ -287,7 +296,11 @@ def cmd_verify(args: argparse.Namespace) -> int:
     root = find_project_root()
     guard = GuardFile(root)
 
-    failures = guard.verify()
+    try:
+        failures = guard.verify()
+    except ImportError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
     if not failures:
         qprint("All protected code verified successfully")
