@@ -3,6 +3,8 @@
 These tests document the behavior of Rust source code parsing.
 """
 
+from pathlib import Path
+
 import pytest
 
 try:
@@ -680,3 +682,372 @@ struct MyStruct {
 
         assert ident is not None
         assert "struct MyStruct" in ident.source
+
+
+class TestRustParserModMembers:
+    """Tests for parsing items inside mod blocks using :: notation."""
+
+    def test_extract_function_in_mod(self):
+        """Can extract a function inside a mod block using :: notation."""
+        source = '''
+mod helpers {
+    pub fn clamp(value: f64, min: f64, max: f64) -> f64 {
+        if value < min { min } else if value > max { max } else { value }
+    }
+}
+'''
+        parser = RustParser()
+        ident = parser.extract_identifier(source, "helpers::clamp")
+
+        assert ident is not None
+        assert ident.name == "helpers::clamp"
+        assert "fn clamp" in ident.source
+
+    def test_extract_test_function_in_mod_tests(self):
+        """Can extract a test function inside mod tests."""
+        source = '''
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic() {
+        assert_eq!(1 + 1, 2);
+    }
+
+    #[test]
+    fn test_advanced() {
+        assert!(true);
+    }
+}
+'''
+        parser = RustParser()
+        ident = parser.extract_identifier(source, "tests::test_basic")
+
+        assert ident is not None
+        assert ident.name == "tests::test_basic"
+        assert "fn test_basic()" in ident.source
+        assert "assert_eq!" in ident.source
+
+    def test_extract_const_in_mod(self):
+        """Can extract a const inside a mod block."""
+        source = '''
+mod config {
+    pub const MAX_SIZE: usize = 1024;
+    pub const MIN_SIZE: usize = 1;
+}
+'''
+        parser = RustParser()
+        ident = parser.extract_identifier(source, "config::MAX_SIZE")
+
+        assert ident is not None
+        assert "const MAX_SIZE" in ident.source
+
+    def test_wildcard_all_mod_members(self):
+        """Wildcard lists all items in a mod block."""
+        source = '''
+mod helpers {
+    pub fn clamp(value: f64, min: f64, max: f64) -> f64 {
+        value
+    }
+
+    pub fn lerp(a: f64, b: f64, t: f64) -> f64 {
+        a + (b - a) * t
+    }
+
+    pub const EPSILON: f64 = 1e-10;
+}
+'''
+        parser = RustParser()
+        members = parser.expand_identifier_pattern(source, "helpers::*")
+
+        names = {m.name for m in members}
+        assert "helpers::clamp" in names
+        assert "helpers::lerp" in names
+        assert "helpers::EPSILON" in names
+
+    def test_wildcard_test_functions(self):
+        """Wildcard pattern matches test functions in mod tests."""
+        source = '''
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_add() { assert_eq!(1 + 1, 2); }
+
+    #[test]
+    fn test_subtract() { assert_eq!(3 - 1, 2); }
+
+    #[test]
+    fn test_multiply() { assert_eq!(2 * 3, 6); }
+
+    fn helper() -> bool { true }
+}
+'''
+        parser = RustParser()
+        members = parser.expand_identifier_pattern(source, "tests::test_*")
+
+        names = {m.name for m in members}
+        assert "tests::test_add" in names
+        assert "tests::test_subtract" in names
+        assert "tests::test_multiply" in names
+        assert "tests::helper" not in names
+
+    def test_list_identifiers_includes_mod_members(self):
+        """list_identifiers enumerates items inside mod blocks."""
+        source = '''
+fn top_level() {}
+
+mod utils {
+    pub fn helper() -> bool { true }
+    pub const VALUE: i32 = 42;
+}
+'''
+        parser = RustParser()
+        identifiers = parser.list_identifiers(source)
+
+        names = {i.name for i in identifiers}
+        assert "top_level" in names
+        assert "utils" in names
+        assert "utils::helper" in names
+        assert "utils::VALUE" in names
+
+    def test_nonexistent_mod_member_returns_none(self):
+        """Returns None for nonexistent mod members."""
+        source = '''
+mod tests {
+    fn test_one() {}
+}
+'''
+        parser = RustParser()
+        result = parser.extract_identifier(source, "tests::nonexistent")
+        assert result is None
+
+    def test_nonexistent_mod_returns_none(self):
+        """Returns None for members of nonexistent mod."""
+        source = '''
+mod tests {
+    fn test_one() {}
+}
+'''
+        parser = RustParser()
+        result = parser.extract_identifier(source, "nonexistent::test_one")
+        assert result is None
+
+    def test_mod_member_hash_changes_on_modification(self, temp_project):
+        """Changing a test function in a mod changes its hash."""
+        from ai_guard.core import GuardFile
+
+        source1 = '''
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_add() {
+        assert_eq!(1 + 1, 2);
+    }
+}
+'''
+        source2 = '''
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_add() {
+        assert_eq!(2 + 2, 4);
+    }
+}
+'''
+        filepath = temp_project / "math.rs"
+        filepath.write_text(source1)
+
+        guard = GuardFile(temp_project)
+        guard.add_identifier("math.rs", "tests::test_add")
+        hash1 = guard.entries[0].hash
+
+        filepath.write_text(source2)
+        guard2 = GuardFile(temp_project)
+        guard2.add_identifier("math.rs", "tests::test_add")
+        hash2 = guard2.entries[0].hash
+
+        assert hash1 != hash2
+
+    def test_verify_changed_mod_member_fails(self, temp_project):
+        """Verification fails when a protected mod member has been modified."""
+        from ai_guard.core import GuardFile
+
+        source1 = '''
+mod helpers {
+    pub fn clamp(value: f64, min: f64, max: f64) -> f64 {
+        if value < min { min } else if value > max { max } else { value }
+    }
+}
+'''
+        source2 = '''
+mod helpers {
+    pub fn clamp(value: f64, min: f64, max: f64) -> f64 {
+        value.max(min).min(max)
+    }
+}
+'''
+        filepath = temp_project / "helpers.rs"
+        filepath.write_text(source1)
+
+        guard = GuardFile(temp_project)
+        guard.add_identifier("helpers.rs", "helpers::clamp")
+        guard.save()
+
+        filepath.write_text(source2)
+
+        guard2 = GuardFile(temp_project)
+        failures = guard2.verify()
+        member_failures = [(e, r) for e, r in failures if e.identifier is not None]
+        assert len(member_failures) == 1
+        assert member_failures[0][0].identifier == "helpers::clamp"
+        assert member_failures[0][1] == "hash mismatch"
+
+
+class TestRustParserFixtures:
+    """Tests using realistic Rust fixture files."""
+
+    FIXTURES_DIR = Path(__file__).parent / "fixtures" / "rust"
+
+    def _read_fixture(self, name: str) -> str:
+        return (self.FIXTURES_DIR / name).read_text(encoding="utf-8")
+
+    def test_lib_top_level_identifiers(self):
+        """lib.rs fixture has expected top-level identifiers."""
+        source = self._read_fixture("lib.rs")
+        parser = RustParser()
+        identifiers = parser.list_identifiers(source)
+
+        names = {i.name for i in identifiers}
+        assert "Point" in names
+        assert "Shape" in names
+        assert "Drawable" in names
+        assert "MAX_POINTS" in names
+        assert "ORIGIN" in names
+        assert "PointPair" in names
+        assert "make_point" in names
+        assert "helpers" in names
+        assert "tests" in names
+
+    def test_lib_mod_test_members(self):
+        """Can list test functions inside mod tests in lib.rs."""
+        source = self._read_fixture("lib.rs")
+        parser = RustParser()
+        members = parser.expand_identifier_pattern(source, "tests::test_*")
+
+        names = {m.name for m in members}
+        assert "tests::test_point_new" in names
+        assert "tests::test_point_distance" in names
+        assert "tests::test_circle_area" in names
+        assert "tests::test_rectangle_area" in names
+        assert "tests::test_origin" in names
+
+    def test_lib_mod_helpers_members(self):
+        """Can list items inside mod helpers in lib.rs."""
+        source = self._read_fixture("lib.rs")
+        parser = RustParser()
+        members = parser.expand_identifier_pattern(source, "helpers::*")
+
+        names = {m.name for m in members}
+        assert "helpers::clamp" in names
+        assert "helpers::lerp" in names
+        assert "helpers::EPSILON" in names
+
+    def test_lib_extract_single_test(self):
+        """Can extract a single test function from mod tests."""
+        source = self._read_fixture("lib.rs")
+        parser = RustParser()
+        ident = parser.extract_identifier(source, "tests::test_point_distance")
+
+        assert ident is not None
+        assert "fn test_point_distance()" in ident.source
+        assert "a.distance(&b)" in ident.source
+
+    def test_lib_impl_methods(self):
+        """Can list impl methods for Point in lib.rs."""
+        source = self._read_fixture("lib.rs")
+        parser = RustParser()
+        members = parser.expand_identifier_pattern(source, "Point::*")
+
+        names = {m.name for m in members}
+        assert "Point::x" in names
+        assert "Point::y" in names
+        assert "Point::new" in names
+        assert "Point::distance" in names
+        assert "Point::origin" in names
+
+    def test_generics_fixture(self):
+        """generics.rs fixture handles generic types and lifetimes."""
+        source = self._read_fixture("generics.rs")
+        parser = RustParser()
+        identifiers = parser.list_identifiers(source)
+
+        names = {i.name for i in identifiers}
+        assert "Wrapper" in names
+        assert "maximum" in names
+        assert "longest" in names
+        assert "process" in names
+        assert "Result" in names
+
+    def test_generics_impl_methods(self):
+        """Can list impl methods on generic Wrapper."""
+        source = self._read_fixture("generics.rs")
+        parser = RustParser()
+        members = parser.expand_identifier_pattern(source, "Wrapper::*")
+
+        names = {m.name for m in members}
+        assert "Wrapper::new" in names
+        assert "Wrapper::into_inner" in names
+        assert "Wrapper::display" in names
+
+    def test_generics_mod_tests(self):
+        """Can list test functions in generics.rs."""
+        source = self._read_fixture("generics.rs")
+        parser = RustParser()
+        members = parser.expand_identifier_pattern(source, "tests::test_*")
+
+        names = {m.name for m in members}
+        assert "tests::test_wrapper_new" in names
+        assert "tests::test_wrapper_display" in names
+        assert "tests::test_maximum" in names
+        assert "tests::test_longest" in names
+
+    def test_async_fixture(self):
+        """async_code.rs fixture handles async/unsafe/const functions."""
+        source = self._read_fixture("async_code.rs")
+        parser = RustParser()
+        identifiers = parser.list_identifiers(source)
+
+        names = {i.name for i in identifiers}
+        assert "fetch_data" in names
+        assert "process_batch" in names
+        assert "raw_pointer_deref" in names
+        assert "const_add" in names
+        assert "Config" in names
+
+    def test_async_config_methods(self):
+        """Can list Config impl methods in async_code.rs."""
+        source = self._read_fixture("async_code.rs")
+        parser = RustParser()
+        members = parser.expand_identifier_pattern(source, "Config::*")
+
+        names = {m.name for m in members}
+        assert "Config::host" in names
+        assert "Config::port" in names
+        assert "Config::timeout_ms" in names
+        assert "Config::retry_count" in names
+        assert "Config::default_config" in names
+        assert "Config::with_host" in names
+        assert "Config::with_port" in names
+
+    def test_async_mod_tests(self):
+        """Can list test functions in async_code.rs."""
+        source = self._read_fixture("async_code.rs")
+        parser = RustParser()
+        members = parser.expand_identifier_pattern(source, "tests::test_*")
+
+        names = {m.name for m in members}
+        assert "tests::test_fetch_data" in names
+        assert "tests::test_const_add" in names
+        assert "tests::test_config_default" in names
+        assert "tests::test_config_builder" in names

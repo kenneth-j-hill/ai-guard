@@ -51,11 +51,19 @@ def _get_node_name(node) -> Optional[str]:
     """Get the name of a tree-sitter node.
 
     For most items this is the 'name' field. For impl_item it is
-    the 'type' field (the type being implemented).
+    the type being implemented, with generic parameters stripped
+    (e.g., ``impl<T> Wrapper<T>`` returns ``"Wrapper"``).
     """
     if node.type == "impl_item":
         type_node = node.child_by_field_name("type")
-        return type_node.text.decode("utf-8") if type_node else None
+        if not type_node:
+            return None
+        # For generic types like Wrapper<T>, extract just the base name
+        if type_node.type == "generic_type":
+            for child in type_node.children:
+                if child.type == "type_identifier":
+                    return child.text.decode("utf-8")
+        return type_node.text.decode("utf-8")
 
     name_node = node.child_by_field_name("name")
     return name_node.text.decode("utf-8") if name_node else None
@@ -117,6 +125,11 @@ class RustParser(Parser):
                 ident = self._node_to_identifier(child, source_bytes, node_name)
                 if ident:
                     identifiers.append(ident)
+
+                # Also enumerate items inside mod blocks
+                if child.type == "mod_item":
+                    mod_members = self._list_mod_members(child, source_bytes, node_name)
+                    identifiers.extend(mod_members)
 
         return identifiers
 
@@ -228,6 +241,40 @@ class RustParser(Parser):
                             members.append(self._node_to_identifier(
                                 member, source_bytes, qn
                             ))
+
+            # Mod block items
+            if child.type == "mod_item":
+                node_name = _get_node_name(child)
+                if node_name != type_name:
+                    continue
+                mod_members = self._list_mod_members(child, source_bytes, type_name)
+                for m in mod_members:
+                    if m.name not in seen_names:
+                        seen_names.add(m.name)
+                        members.append(m)
+
+        return members
+
+    def _list_mod_members(
+        self, mod_node, source_bytes: bytes, mod_name: str
+    ) -> list[Identifier]:
+        """List all named items inside a mod block."""
+        members = []
+        body = mod_node.child_by_field_name("body")
+        if not body:
+            return members
+
+        for member in body.children:
+            if not member.is_named:
+                continue
+            if member.type not in _TOP_LEVEL_TYPES:
+                continue
+            member_name = _get_node_name(member)
+            if member_name:
+                qn = f"{mod_name}::{member_name}"
+                members.append(self._node_to_identifier(
+                    member, source_bytes, qn
+                ))
 
         return members
 
