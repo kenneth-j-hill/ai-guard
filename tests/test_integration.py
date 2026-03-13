@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from ai_guard.cli import main
+from ai_guard.cli import main, _PRE_COMMIT_SECTION
 
 
 # Check if ai-guard CLI is available in PATH (required for shell script tests)
@@ -32,6 +32,14 @@ def _get_subprocess_env():
     return env
 
 
+def _install_pre_commit_hook(temp_project):
+    """Write the pre-commit hook directly (no interactive prompts)."""
+    hook_path = temp_project / ".git" / "hooks" / "pre-commit"
+    hook_path.write_text("#!/bin/sh\n" + _PRE_COMMIT_SECTION + "\n", encoding="utf-8")
+    hook_path.chmod(0o755)
+    return hook_path
+
+
 class TestPreCommitHookIntegration:
     """Integration tests for the pre-commit hook."""
 
@@ -42,10 +50,6 @@ class TestPreCommitHookIntegration:
         # Protect a test class
         main(["add", "sample.py:SimpleClass"])
 
-        # Install the hook
-        main(["install-hook"])
-
-        hook_path = temp_project / ".git" / "hooks" / "pre-commit"
         original_content = sample_python_file.read_text()
 
         # Modify the protected code
@@ -55,7 +59,7 @@ class TestPreCommitHookIntegration:
         )
         sample_python_file.write_text(modified_content)
 
-        # Run the hook script directly
+        # Run verify directly via subprocess
         result = subprocess.run(
             [sys.executable, "-m", "ai_guard.cli", "verify"],
             capture_output=True,
@@ -70,7 +74,7 @@ class TestPreCommitHookIntegration:
         # Restore the original content
         sample_python_file.write_text(original_content)
 
-        # Run the hook again
+        # Run verify again
         result = subprocess.run(
             [sys.executable, "-m", "ai_guard.cli", "verify"],
             capture_output=True,
@@ -78,7 +82,7 @@ class TestPreCommitHookIntegration:
             env=_get_subprocess_env(),
         )
 
-        # Hook should pass now
+        # Should pass now
         assert result.returncode == 0
         assert "verified successfully" in result.stdout
 
@@ -90,10 +94,9 @@ class TestPreCommitHookIntegration:
         # Protect a function
         main(["add", "sample.py:simple_function"])
 
-        # Install the hook
-        main(["install-hook"])
+        # Install the hook directly
+        hook_path = _install_pre_commit_hook(temp_project)
 
-        hook_path = temp_project / ".git" / "hooks" / "pre-commit"
         original_content = sample_python_file.read_text()
 
         # Modify the protected function

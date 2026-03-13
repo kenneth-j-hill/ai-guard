@@ -30,6 +30,18 @@ def entry_target(entry) -> str:
     return f"{entry.path}:{entry.identifier}" if entry.identifier else entry.path
 
 
+def _check_conflicts(guard: GuardFile) -> bool:
+    """Check if .ai-guard has conflict markers. Print error and return True if so."""
+    if guard.has_conflicts:
+        print(
+            "Error: .ai-guard contains merge conflict markers.\n"
+            "Run 'ai-guard resolve' to recompute hashes from the merged source tree.",
+            file=sys.stderr,
+        )
+        return True
+    return False
+
+
 def find_project_root(start: Optional[Path] = None) -> Path:
     """Find the project root by looking for .git directory.
 
@@ -134,6 +146,8 @@ def cmd_add(args: argparse.Namespace) -> int:
     """Add protection for a file or identifier."""
     root = find_project_root()
     guard = GuardFile(root)
+    if _check_conflicts(guard):
+        return 1
 
     any_success = False
     any_error = False
@@ -184,6 +198,8 @@ def cmd_update(args: argparse.Namespace) -> int:
 
     root = find_project_root()
     guard = GuardFile(root)
+    if _check_conflicts(guard):
+        return 1
 
     any_success = False
     any_error = False
@@ -212,13 +228,17 @@ def cmd_update(args: argparse.Namespace) -> int:
                         pprint(entry_target(upd))
                     any_success = True
             except FileNotFoundError:
-                print(f"Error: File not found: {entry.path}", file=sys.stderr)
+                target = entry_target(entry)
+                print(f"Error: File not found: {target}", file=sys.stderr)
+                print(f"  Run 'ai-guard remove {target}' to remove this entry.", file=sys.stderr)
                 any_error = True
             except ImportError as e:
                 print(f"Error: {e}", file=sys.stderr)
                 any_error = True
-            except ValueError as e:
-                print(f"Error: {e}", file=sys.stderr)
+            except ValueError:
+                target = entry_target(entry)
+                print(f"Error: Identifier not found: {target}", file=sys.stderr)
+                print(f"  Run 'ai-guard remove {target}' to remove this entry.", file=sys.stderr)
                 any_error = True
     else:
         for target in args.targets:
@@ -252,6 +272,8 @@ def cmd_remove(args: argparse.Namespace) -> int:
     """Remove protection for a file or identifier."""
     root = find_project_root()
     guard = GuardFile(root)
+    if _check_conflicts(guard):
+        return 1
 
     all_removed = []
     for target in args.targets:
@@ -274,6 +296,8 @@ def cmd_list(args: argparse.Namespace) -> int:
     """List all protected entries."""
     root = find_project_root()
     guard = GuardFile(root)
+    if _check_conflicts(guard):
+        return 1
 
     entries = guard.list_entries()
     if not entries:
@@ -295,6 +319,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
     """Verify all protected entries."""
     root = find_project_root()
     guard = GuardFile(root)
+    if _check_conflicts(guard):
+        return 1
 
     try:
         failures = guard.verify()
@@ -320,21 +346,42 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 1
 
 
-def cmd_install_hook(args: argparse.Namespace) -> int:
-    """Install the git pre-commit hook."""
+def cmd_resolve(args: argparse.Namespace) -> int:
+    """Resolve .ai-guard after a merge."""
     root = find_project_root()
-    hooks_dir = root / ".git" / "hooks"
+    guard = GuardFile(root)
 
-    if not hooks_dir.exists():
-        print("Error: .git/hooks directory not found", file=sys.stderr)
+    try:
+        resolved, conflicted_files = guard.resolve()
+    except ImportError as e:
+        print(f"Error: {e}", file=sys.stderr)
         return 1
 
-    hook_path = hooks_dir / "pre-commit"
+    if conflicted_files:
+        print("Error: Guarded source files still have merge conflict markers:", file=sys.stderr)
+        for path in conflicted_files:
+            print(f"  {path}", file=sys.stderr)
+        print("\nResolve these conflicts first, then run 'ai-guard resolve' again.", file=sys.stderr)
+        return 1
 
-    hook_content = '''#!/bin/sh
-# ai-guard pre-commit hook
-# Prevents commits that modify protected code
+    guard.save()
 
+    for entry in resolved:
+        if entry.identifier:
+            qprint(f"Resolved {entry.path}:{entry.identifier} ({entry.hash})")
+        else:
+            qprint(f"Resolved {entry.path} ({entry.hash})")
+        pprint(entry_target(entry))
+
+    qprint(f"Resolved {len(resolved)} entries")
+    return 0
+
+
+_BEGIN_MARKER = "# --- ai-guard {name} ---"
+_END_MARKER = "# --- end ai-guard ---"
+
+_PRE_COMMIT_SECTION = """\
+# --- ai-guard pre-commit ---
 ai-guard verify
 if [ $? -ne 0 ]; then
     echo ""
@@ -342,26 +389,294 @@ if [ $? -ne 0 ]; then
     echo "If this change is intentional, run 'ai-guard update <path>' first."
     exit 1
 fi
-'''
+# --- end ai-guard ---"""
 
-    # Check if hook already exists
+_POST_MERGE_SECTION = """\
+# --- ai-guard post-merge ---
+ai-guard resolve
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "ai-guard resolve failed. Run 'ai-guard resolve' manually"
+    echo "after resolving any remaining source conflicts."
+fi
+# --- end ai-guard ---"""
+
+_MERGE_DRIVER_SCRIPT = """\
+#!/bin/sh
+# ai-guard merge driver — union merge for .ai-guard files
+python3 -c "
+from ai_guard.merge_driver import run_merge_driver
+import sys
+sys.exit(run_merge_driver(sys.argv[1], sys.argv[2], sys.argv[3]))
+" "$1" "$2" "$3"
+"""
+
+# Old hook pattern (from install-hook, no delimiters)
+_OLD_HOOK_START = "# ai-guard pre-commit hook"
+_OLD_HOOK_END_PATTERN = "fi\n"
+
+
+def _find_ai_guard_section(content: str, section_name: str) -> tuple[Optional[int], Optional[int]]:
+    """Find the start and end of a delimited ai-guard section in hook content.
+
+    Returns (start, end) character offsets, or (None, None) if not found.
+    """
+    begin = _BEGIN_MARKER.format(name=section_name)
+    start = content.find(begin)
+    if start == -1:
+        return None, None
+    end = content.find(_END_MARKER, start)
+    if end == -1:
+        return None, None
+    end += len(_END_MARKER)
+    # Include trailing newline if present
+    if end < len(content) and content[end] == "\n":
+        end += 1
+    return start, end
+
+
+def _find_old_hook_section(content: str) -> tuple[Optional[int], Optional[int]]:
+    """Find the old-style (pre-delimiter) ai-guard section.
+
+    The old install-hook wrote a section starting with '# ai-guard pre-commit hook'
+    through the closing 'fi' of the verify check.
+    """
+    start = content.find(_OLD_HOOK_START)
+    if start == -1:
+        return None, None
+    # Find the 'fi' that closes the if block after ai-guard verify
+    fi_pos = content.find("\nfi\n", start)
+    if fi_pos == -1:
+        # Might be at end of file without trailing newline
+        fi_pos = content.find("\nfi", start)
+        if fi_pos == -1:
+            return None, None
+        end = fi_pos + len("\nfi")
+    else:
+        end = fi_pos + len("\nfi\n")
+    return start, end
+
+
+def _prompt_user(prompt: str) -> bool:
+    """Prompt user for y/n confirmation."""
+    try:
+        response = input(f"{prompt} [y/n] ").strip().lower()
+        return response in ("y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+
+
+def _install_hook_section(hook_path: Path, section_name: str, section_content: str) -> bool:
+    """Install or update an ai-guard section in a hook file.
+
+    Returns True if the section was installed/updated, False if skipped.
+    """
     if hook_path.exists():
         existing = hook_path.read_text(encoding="utf-8")
-        if "ai-guard" in existing:
-            qprint("ai-guard hook already installed")
-            return 0
-        else:
-            # Append to existing hook
-            hook_content = existing.rstrip() + "\n\n" + hook_content
-            qprint("Appending ai-guard to existing pre-commit hook")
+
+        # Check for new-style delimited section
+        start, end = _find_ai_guard_section(existing, section_name)
+        if start is not None:
+            current_section = existing[start:end].rstrip("\n")
+            if current_section == section_content:
+                print(f"\n  {section_name} hook — already installed, up to date")
+                return False
+            # Show diff and prompt for replacement
+            print(f"\n  {section_name} hook")
+            print(f"  File: {hook_path}")
+            print(f"  Note: Existing ai-guard section found, will be replaced")
+            print(f"\n  --- current ai-guard section ---")
+            for line in current_section.splitlines():
+                print(f"  {line}")
+            print(f"\n  --- new ai-guard section ---")
+            for line in section_content.splitlines():
+                print(f"  {line}")
+            print()
+            if not _prompt_user("  Replace?"):
+                return False
+            new_content = existing[:start] + section_content + "\n" + existing[end:]
+            hook_path.write_text(new_content, encoding="utf-8")
+            hook_path.chmod(0o755)
+            return True
+
+        # Check for old-style section (pre-commit only)
+        if section_name == "pre-commit":
+            old_start, old_end = _find_old_hook_section(existing)
+            if old_start is not None:
+                current_section = existing[old_start:old_end].rstrip("\n")
+                print(f"\n  {section_name} hook")
+                print(f"  File: {hook_path}")
+                print(f"  Note: Old-style ai-guard section found, will be replaced with delimited version")
+                print(f"\n  --- current ai-guard section ---")
+                for line in current_section.splitlines():
+                    print(f"  {line}")
+                print(f"\n  --- new ai-guard section ---")
+                for line in section_content.splitlines():
+                    print(f"  {line}")
+                print()
+                if not _prompt_user("  Replace?"):
+                    return False
+                new_content = existing[:old_start] + section_content + "\n" + existing[old_end:]
+                hook_path.write_text(new_content, encoding="utf-8")
+                hook_path.chmod(0o755)
+                return True
+
+        # No ai-guard section — append
+        print(f"\n  {section_name} hook")
+        print(f"  File: {hook_path}")
+        print(f"  Note: Existing hook found, ai-guard section will be appended")
+        print(f"\n  --- content to append ---")
+        for line in section_content.splitlines():
+            print(f"  {line}")
+        print()
+        if not _prompt_user("  Install?"):
+            return False
+        new_content = existing.rstrip() + "\n\n" + section_content + "\n"
+        hook_path.write_text(new_content, encoding="utf-8")
+        hook_path.chmod(0o755)
+        return True
     else:
-        qprint("Installing pre-commit hook")
+        # New hook file
+        print(f"\n  {section_name} hook")
+        print(f"  File: {hook_path}")
+        print(f"\n  --- content ---")
+        for line in section_content.splitlines():
+            print(f"  {line}")
+        print()
+        if not _prompt_user("  Install?"):
+            return False
+        full_content = "#!/bin/sh\n" + section_content + "\n"
+        hook_path.write_text(full_content, encoding="utf-8")
+        hook_path.chmod(0o755)
+        return True
 
-    hook_path.write_text(hook_content, encoding="utf-8")
-    hook_path.chmod(0o755)
 
-    qprint(f"Hook installed at {hook_path}")
+def cmd_install_git_hooks(args: argparse.Namespace) -> int:
+    """Interactively install git hooks and merge configuration."""
+    root = find_project_root()
+    hooks_dir = root / ".git" / "hooks"
+
+    if not hooks_dir.exists():
+        print("Error: .git/hooks directory not found", file=sys.stderr)
+        return 1
+
+    print("ai-guard git hooks installer")
+    print("Each item is shown with its content. You are prompted before installation.")
+
+    # 1. Pre-commit hook
+    print("\n" + "=" * 60)
+    print("1. Pre-commit hook")
+    print("   Runs 'ai-guard verify' before each commit. Blocks the")
+    print("   commit if protected code was modified without updating hashes.")
+    _install_hook_section(hooks_dir / "pre-commit", "pre-commit", _PRE_COMMIT_SECTION)
+
+    # 2. Post-merge hook
+    print("\n" + "=" * 60)
+    print("2. Post-merge hook")
+    print("   Runs 'ai-guard resolve' after a merge completes. Recomputes")
+    print("   hashes for all protected entries to match the merged source tree.")
+    _install_hook_section(hooks_dir / "post-merge", "post-merge", _POST_MERGE_SECTION)
+
+    # 3. Merge driver
+    print("\n" + "=" * 60)
+    print("3. Merge driver")
+    print("   Configures a custom git merge driver that prevents merge")
+    print("   conflicts in .ai-guard. Instead of three-way merging, git")
+    print("   keeps all entries from both sides and lets the post-merge")
+    print("   hook recompute the correct hashes.")
+    _install_merge_driver(root, hooks_dir)
+
+    print()
     return 0
+
+
+def _install_merge_driver(root: Path, hooks_dir: Path) -> None:
+    """Install the merge driver script and configuration."""
+    import subprocess
+
+    driver_path = hooks_dir / "ai-guard-merge-driver"
+    gitattributes_path = root / ".gitattributes"
+
+    # Check current state
+    driver_exists = driver_path.exists()
+    driver_current = False
+    if driver_exists:
+        existing_driver = driver_path.read_text(encoding="utf-8")
+        driver_current = existing_driver == _MERGE_DRIVER_SCRIPT
+
+    # Check git config
+    config_set = False
+    try:
+        result = subprocess.run(
+            ["git", "config", "--local", "merge.ai-guard.driver"],
+            capture_output=True, text=True, cwd=root,
+        )
+        config_set = result.returncode == 0
+    except FileNotFoundError:
+        pass
+
+    # Check .gitattributes
+    attr_set = False
+    if gitattributes_path.exists():
+        attr_content = gitattributes_path.read_text(encoding="utf-8")
+        attr_set = ".ai-guard merge=ai-guard" in attr_content
+
+    if driver_current and config_set and attr_set:
+        print("\n  Merge driver — already installed, up to date")
+        return
+
+    # Show what will be changed
+    changes = []
+    if not driver_current:
+        changes.append(f"  Will install: {driver_path}")
+        print(f"\n  --- driver script ---")
+        for line in _MERGE_DRIVER_SCRIPT.splitlines():
+            print(f"  {line}")
+    if not config_set:
+        changes.append("  Will add to .git/config:")
+        changes.append('    [merge "ai-guard"]')
+        changes.append(f"        driver = {driver_path} %O %A %B")
+        changes.append('        name = ai-guard merge driver')
+    if not attr_set:
+        changes.append(f"  Will add to .gitattributes:")
+        changes.append("    .ai-guard merge=ai-guard")
+
+    if changes:
+        print()
+        for line in changes:
+            print(line)
+        print()
+
+    if not _prompt_user("  Install?"):
+        return
+
+    # Install driver script
+    if not driver_current:
+        driver_path.write_text(_MERGE_DRIVER_SCRIPT, encoding="utf-8")
+        driver_path.chmod(0o755)
+
+    # Configure git
+    if not config_set:
+        subprocess.run(
+            ["git", "config", "--local", "merge.ai-guard.driver",
+             f"{driver_path} %O %A %B"],
+            cwd=root, check=True,
+        )
+        subprocess.run(
+            ["git", "config", "--local", "merge.ai-guard.name",
+             "ai-guard merge driver"],
+            cwd=root, check=True,
+        )
+
+    # Update .gitattributes
+    if not attr_set:
+        if gitattributes_path.exists():
+            content = gitattributes_path.read_text(encoding="utf-8")
+            content = content.rstrip() + "\n.ai-guard merge=ai-guard\n"
+        else:
+            content = ".ai-guard merge=ai-guard\n"
+        gitattributes_path.write_text(content, encoding="utf-8")
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -438,11 +753,47 @@ def main(argv: Optional[list[str]] = None) -> int:
     verify_parser = subparsers.add_parser("verify", help="Verify all protected entries")
     verify_parser.set_defaults(func=cmd_verify)
 
-    # install-hook command
-    install_parser = subparsers.add_parser(
-        "install-hook", help="Install the git pre-commit hook"
+    # resolve command
+    resolve_parser = subparsers.add_parser(
+        "resolve",
+        help="Resolve .ai-guard after a merge",
+        description=(
+            "Resolve .ai-guard after a merge. Recomputes all hashes from the current\n"
+            "source tree. Entries whose files or identifiers no longer exist are removed.\n\n"
+            "Because the user performed the merge and resolved any source conflicts,\n"
+            "running resolve treats the merged source as approved. Hashes are recomputed\n"
+            "to match the merged result without further confirmation.\n\n"
+            "Source files with merge conflict markers will block resolution — resolve\n"
+            "those conflicts first."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    install_parser.set_defaults(func=cmd_install_hook)
+    resolve_parser.set_defaults(func=cmd_resolve)
+
+    # install-git-hooks command
+    install_parser = subparsers.add_parser(
+        "install-git-hooks",
+        help="Interactively install git hooks and merge configuration",
+        description=(
+            "Interactively install git hooks and merge configuration for ai-guard.\n"
+            "Each item is shown with its content and you are prompted before installation.\n\n"
+            "Available items:\n\n"
+            "  pre-commit      Runs 'ai-guard verify' before each commit. Blocks the\n"
+            "                  commit if protected code was modified without updating\n"
+            "                  hashes.\n\n"
+            "  post-merge      Runs 'ai-guard resolve' after a merge completes.\n"
+            "                  Recomputes hashes for all protected entries to match\n"
+            "                  the merged source tree.\n\n"
+            "  merge-driver    Configures a custom git merge driver that prevents\n"
+            "                  merge conflicts in .ai-guard. Instead of three-way\n"
+            "                  merging the file, git keeps all entries from both\n"
+            "                  sides and lets the post-merge hook recompute the\n"
+            "                  correct hashes. Adds an entry to .gitattributes\n"
+            "                  (tracked) and .git/config (local)."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    install_parser.set_defaults(func=cmd_install_git_hooks)
 
     args = parser.parse_args(argv)
     global _quiet, _porcelain

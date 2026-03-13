@@ -1,174 +1,258 @@
-"""Tests for the git pre-commit hook.
+"""Tests for the git hooks installation and behavior."""
 
-These tests document the hook installation and behavior.
-"""
-
+import shutil
+import subprocess
 import sys
 import stat
 
 import pytest
 
-from ai_guard.cli import main
+from ai_guard.cli import main, _PRE_COMMIT_SECTION, _POST_MERGE_SECTION, _MERGE_DRIVER_SCRIPT
 
 
 IS_WINDOWS = sys.platform == "win32"
 
 
-class TestHookInstallation:
-    """Tests for installing the pre-commit hook."""
+@pytest.fixture
+def git_temp_project(tmp_path):
+    """Create a temp project with a real git repo (needed for git config)."""
+    subprocess.run(["git", "init", "-b", "main", str(tmp_path)],
+                   capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "test@test.com"],
+                   cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"],
+                   cwd=tmp_path, capture_output=True, check=True)
+    return tmp_path
 
-    def test_install_hook_creates_file(self, temp_project, monkeypatch):
-        """'ai-guard install-hook' creates the pre-commit hook."""
-        monkeypatch.chdir(temp_project)
-        result = main(["install-hook"])
+
+class TestInstallGitHooks:
+    """Tests for the install-git-hooks command."""
+
+    def test_creates_pre_commit_hook(self, git_temp_project, monkeypatch):
+        """install-git-hooks creates the pre-commit hook when user approves."""
+        monkeypatch.chdir(git_temp_project)
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+        result = main(["install-git-hooks"])
 
         assert result == 0
-        hook_path = temp_project / ".git" / "hooks" / "pre-commit"
+        hook_path = git_temp_project / ".git" / "hooks" / "pre-commit"
         assert hook_path.exists()
+        content = hook_path.read_text(encoding="utf-8")
+        assert "ai-guard verify" in content
+        assert "# --- ai-guard pre-commit ---" in content
+        assert "# --- end ai-guard ---" in content
+
+    def test_creates_post_merge_hook(self, git_temp_project, monkeypatch):
+        """install-git-hooks creates the post-merge hook when user approves."""
+        monkeypatch.chdir(git_temp_project)
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+        main(["install-git-hooks"])
+
+        hook_path = git_temp_project / ".git" / "hooks" / "post-merge"
+        assert hook_path.exists()
+        content = hook_path.read_text(encoding="utf-8")
+        assert "ai-guard resolve" in content
+        assert "# --- ai-guard post-merge ---" in content
+
+    def test_installs_merge_driver_script(self, git_temp_project, monkeypatch):
+        """install-git-hooks creates the merge driver script."""
+        monkeypatch.chdir(git_temp_project)
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+        main(["install-git-hooks"])
+
+        driver_path = git_temp_project / ".git" / "hooks" / "ai-guard-merge-driver"
+        assert driver_path.exists()
+
+    def test_creates_gitattributes(self, git_temp_project, monkeypatch):
+        """install-git-hooks adds merge driver entry to .gitattributes."""
+        monkeypatch.chdir(git_temp_project)
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+        main(["install-git-hooks"])
+
+        attr_path = git_temp_project / ".gitattributes"
+        assert attr_path.exists()
+        content = attr_path.read_text(encoding="utf-8")
+        assert ".ai-guard merge=ai-guard" in content
+
+    def test_appends_to_existing_gitattributes(self, git_temp_project, monkeypatch):
+        """Merge driver entry is appended to existing .gitattributes."""
+        attr_path = git_temp_project / ".gitattributes"
+        attr_path.write_text("*.txt text\n", encoding="utf-8")
+
+        monkeypatch.chdir(git_temp_project)
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+        main(["install-git-hooks"])
+
+        content = attr_path.read_text(encoding="utf-8")
+        assert "*.txt text" in content
+        assert ".ai-guard merge=ai-guard" in content
 
     @pytest.mark.skipif(IS_WINDOWS, reason="Windows does not use Unix file permissions")
-    def test_hook_is_executable(self, temp_project, monkeypatch):
-        """The installed hook has executable permissions."""
-        monkeypatch.chdir(temp_project)
-        main(["install-hook"])
+    def test_hooks_are_executable(self, git_temp_project, monkeypatch):
+        """Installed hooks have executable permissions."""
+        monkeypatch.chdir(git_temp_project)
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+        main(["install-git-hooks"])
 
-        hook_path = temp_project / ".git" / "hooks" / "pre-commit"
-        mode = hook_path.stat().st_mode
-        assert mode & stat.S_IXUSR  # Owner execute
+        for name in ["pre-commit", "post-merge", "ai-guard-merge-driver"]:
+            hook_path = git_temp_project / ".git" / "hooks" / name
+            mode = hook_path.stat().st_mode
+            assert mode & stat.S_IXUSR
 
-    def test_hook_contains_verify_command(self, temp_project, monkeypatch):
-        """The hook calls 'ai-guard verify'."""
-        monkeypatch.chdir(temp_project)
-        main(["install-hook"])
-
-        hook_path = temp_project / ".git" / "hooks" / "pre-commit"
-        content = hook_path.read_text()
-
-        assert "ai-guard verify" in content
-
-    def test_hook_exits_on_failure(self, temp_project, monkeypatch):
-        """The hook script exits with non-zero on verification failure."""
-        monkeypatch.chdir(temp_project)
-        main(["install-hook"])
-
-        hook_path = temp_project / ".git" / "hooks" / "pre-commit"
-        content = hook_path.read_text()
-
-        # Should check the exit code and exit 1 on failure
-        assert "exit 1" in content
-
-    def test_install_hook_appends_to_existing(self, temp_project, monkeypatch):
-        """Installing hook appends to existing pre-commit hook."""
-        hook_path = temp_project / ".git" / "hooks" / "pre-commit"
+    def test_appends_to_existing_non_ai_guard_hook(self, git_temp_project, monkeypatch):
+        """ai-guard section is appended to existing non-ai-guard hooks."""
+        hook_path = git_temp_project / ".git" / "hooks" / "pre-commit"
         hook_path.write_text("#!/bin/sh\necho 'existing hook'\n", encoding="utf-8")
 
-        monkeypatch.chdir(temp_project)
-        result = main(["install-hook"])
+        monkeypatch.chdir(git_temp_project)
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+        main(["install-git-hooks"])
 
-        assert result == 0
-        content = hook_path.read_text()
+        content = hook_path.read_text(encoding="utf-8")
         assert "existing hook" in content
         assert "ai-guard verify" in content
 
-    def test_install_hook_idempotent(self, temp_project, monkeypatch):
-        """Installing hook twice doesn't duplicate the ai-guard section."""
+    def test_no_git_fails(self, tmp_path, monkeypatch):
+        """install-git-hooks fails when not in a git repository."""
+        monkeypatch.chdir(tmp_path)
+        result = main(["install-git-hooks"])
+        assert result == 1
+
+    def test_user_declines_all(self, temp_project, monkeypatch):
+        """Declining all prompts results in no hooks installed."""
         monkeypatch.chdir(temp_project)
-        main(["install-hook"])
-        main(["install-hook"])
+        monkeypatch.setattr("builtins.input", lambda _: "n")
+        result = main(["install-git-hooks"])
 
-        hook_path = temp_project / ".git" / "hooks" / "pre-commit"
-        content = hook_path.read_text()
+        assert result == 0
+        assert not (temp_project / ".git" / "hooks" / "pre-commit").exists()
+        assert not (temp_project / ".git" / "hooks" / "post-merge").exists()
 
-        # Should only appear once
+
+class TestInstallGitHooksIdempotent:
+    """Running install-git-hooks twice is idempotent."""
+
+    def test_second_run_shows_up_to_date(self, git_temp_project, monkeypatch, capsys):
+        """Running install-git-hooks twice shows 'already installed'."""
+        monkeypatch.chdir(git_temp_project)
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+        main(["install-git-hooks"])
+
+        # Second run — hooks should be detected as up to date
+        main(["install-git-hooks"])
+        captured = capsys.readouterr()
+        assert "already installed" in captured.out
+
+    def test_pre_commit_not_duplicated(self, git_temp_project, monkeypatch):
+        """Running twice doesn't duplicate the pre-commit section."""
+        monkeypatch.chdir(git_temp_project)
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+        main(["install-git-hooks"])
+        main(["install-git-hooks"])
+
+        hook_path = git_temp_project / ".git" / "hooks" / "pre-commit"
+        content = hook_path.read_text(encoding="utf-8")
         assert content.count("ai-guard verify") == 1
 
-    def test_install_hook_no_git_fails(self, tmp_path, monkeypatch):
-        """Installing hook fails when not in a git repository."""
-        monkeypatch.chdir(tmp_path)
-        result = main(["install-hook"])
 
-        assert result == 1
+class TestMigrateOldHook:
+    """Tests for migrating old install-hook output."""
+
+    def test_detects_old_hook_format(self, git_temp_project, monkeypatch):
+        """Old-style hook (no delimiters) is detected and replaced."""
+        old_content = (
+            "#!/bin/sh\n"
+            "# ai-guard pre-commit hook\n"
+            "# Prevents commits that modify protected code\n"
+            "\n"
+            "ai-guard verify\n"
+            "if [ $? -ne 0 ]; then\n"
+            '    echo ""\n'
+            '    echo "Commit blocked: Protected code was modified."\n'
+            "    echo \"If this change is intentional, run 'ai-guard update <path>' first.\"\n"
+            "    exit 1\n"
+            "fi\n"
+        )
+        hook_path = git_temp_project / ".git" / "hooks" / "pre-commit"
+        hook_path.write_text(old_content, encoding="utf-8")
+
+        monkeypatch.chdir(git_temp_project)
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+        main(["install-git-hooks"])
+
+        content = hook_path.read_text(encoding="utf-8")
+        assert "# --- ai-guard pre-commit ---" in content
+        assert "# ai-guard pre-commit hook" not in content
+
+    def test_old_hook_appended_to_existing(self, git_temp_project, monkeypatch):
+        """Old-style hook appended to existing content is replaced cleanly."""
+        old_content = (
+            "#!/bin/sh\n"
+            "echo 'other stuff'\n"
+            "\n"
+            "# ai-guard pre-commit hook\n"
+            "# Prevents commits that modify protected code\n"
+            "\n"
+            "ai-guard verify\n"
+            "if [ $? -ne 0 ]; then\n"
+            '    echo ""\n'
+            '    echo "Commit blocked: Protected code was modified."\n'
+            "    echo \"If this change is intentional, run 'ai-guard update <path>' first.\"\n"
+            "    exit 1\n"
+            "fi\n"
+        )
+        hook_path = git_temp_project / ".git" / "hooks" / "pre-commit"
+        hook_path.write_text(old_content, encoding="utf-8")
+
+        monkeypatch.chdir(git_temp_project)
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+        main(["install-git-hooks"])
+
+        content = hook_path.read_text(encoding="utf-8")
+        assert "other stuff" in content
+        assert "# --- ai-guard pre-commit ---" in content
+        assert content.count("ai-guard verify") == 1
 
 
 class TestHookBehavior:
-    """Tests documenting how the hook behaves during commits.
-
-    Note: These are documentation tests - actual git commit testing
-    would require integration tests with real git operations.
-    """
+    """Tests documenting how the hooks behave."""
 
     def test_hook_blocks_on_protected_change(self, temp_project, monkeypatch):
-        """The hook blocks commits when protected code has changed.
-
-        When a developer modifies protected code and tries to commit:
-        1. Git runs the pre-commit hook
-        2. The hook runs 'ai-guard verify'
-        3. Verification fails due to hash mismatch
-        4. Hook exits with code 1, blocking the commit
-        5. Developer sees message about running 'ai-guard update'
-        """
+        """The pre-commit hook blocks commits when protected code has changed."""
         filepath = temp_project / "config.py"
         filepath.write_text("SECRET = 42\n", encoding="utf-8")
 
         monkeypatch.chdir(temp_project)
         main(["add", "config.py"])
-        main(["install-hook"])
 
-        # Simulate what happens when the file is modified
         filepath.write_text("SECRET = 99\n", encoding="utf-8")
-
-        # The hook would run verify, which fails
         result = main(["verify"])
-        assert result == 1  # Commit would be blocked
+        assert result == 1
 
     def test_hook_allows_unprotected_changes(self, temp_project, monkeypatch):
-        """The hook allows commits that don't touch protected code.
-
-        When a developer modifies non-protected code:
-        1. Git runs the pre-commit hook
-        2. The hook runs 'ai-guard verify'
-        3. Verification passes (no protected code changed)
-        4. Hook exits with code 0, allowing the commit
-        """
+        """The pre-commit hook allows commits that don't touch protected code."""
         config = temp_project / "config.py"
         config.write_text("SECRET = 42\n", encoding="utf-8")
-
         other = temp_project / "other.py"
         other.write_text("x = 1\n", encoding="utf-8")
 
         monkeypatch.chdir(temp_project)
-        main(["add", "config.py"])  # Only protect config.py
-        main(["install-hook"])
+        main(["add", "config.py"])
 
-        # Modify the unprotected file
         other.write_text("x = 2\n", encoding="utf-8")
-
-        # Verify still passes
         result = main(["verify"])
-        assert result == 0  # Commit would proceed
+        assert result == 0
 
     def test_hook_allows_after_update(self, temp_project, monkeypatch):
-        """After running 'ai-guard update', commits are allowed.
-
-        When a developer intentionally modifies protected code:
-        1. Modify the protected code
-        2. Run 'ai-guard update path/to/file.py'
-        3. Hash is recalculated
-        4. 'ai-guard verify' passes
-        5. Commit proceeds
-        """
+        """After 'ai-guard update', verify passes."""
         filepath = temp_project / "config.py"
         filepath.write_text("SECRET = 42\n", encoding="utf-8")
 
         monkeypatch.chdir(temp_project)
         main(["add", "config.py"])
 
-        # Intentionally modify
         filepath.write_text("SECRET = 99\n", encoding="utf-8")
-
-        # Update the hash
         main(["update", "config.py"])
 
-        # Now verify passes
         result = main(["verify"])
-        assert result == 0  # Commit would proceed
+        assert result == 0

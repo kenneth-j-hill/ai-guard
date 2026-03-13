@@ -1,4 +1,4 @@
-.ai-guard:283bc35ebc680cf7
+.ai-guard:2ae34a017fc095e2
 tests/test_cli.py:TestVerifyCommand:00efa4b26f55eb81
 tests/test_cli.py:TestUpdateCommand:dced022560f6858e
 tests/test_cli.py:TestRemoveCommand:f6c60ef5a3c29574
@@ -14,7 +14,7 @@ tests/test_gcc_parser.py:TestGCCParserListIdentifiers:3fe1855bf4f2e6bb
 tests/test_gcc_parser.py:TestGPPParserCppFeatures:5b9a7afe9c3f927f
 tests/test_hash_computation.py:TestFileHashing:0392cd87c5f73773
 tests/test_hash_computation.py:TestIdentifierHashing:64634d017a2c4af2
-tests/test_hook.py:TestHookBehavior:1fe1c736a40c7a32
+tests/test_hook.py:TestHookBehavior:fffca607fb2c5964
 tests/test_identifier_protection.py:TestIdentifierProtection:1f6943dc6a5493d9
 tests/test_identifier_protection.py:TestDecoratedIdentifiers:356c32f15be48c02
 tests/test_parser_interface.py:TestParserInterface:6ae28290ecf5b2a8
@@ -24,7 +24,19 @@ tests/test_parser_interface.py:TestAddingNewLanguageSupport:684921c2af2d2d87
 tests/test_wildcards.py:TestWildcardPatterns:e219922ca7662ae7
 tests/test_cli.py:TestAddCommand:fdc84e29a58a49ec
 tests/test_gcc_parser.py:TestGCCParserEdgeCases:3f9da598bd4777ff
-tests/test_hook.py:TestHookInstallation:ea4fd0b209f81a65
-tests/test_integration.py:TestPreCommitHookIntegration:5c030c26bd5a4be7
+tests/test_integration.py:TestPreCommitHookIntegration:2b60492d4f2d8959
 tests/test_cli.py:TestParseTarget:18b3c71c33c47543
 tests/test_cli.py:TestQuietOption:275409a8393bed28
+tests/test_conflict_detection.py:TestConflictDetection:567adae007f3906f
+tests/test_resolve.py:TestResolveClean:368535aa9cbdd82f
+tests/test_resolve.py:TestResolveTwoWayConflict:92f18926fd39cd5a
+tests/test_resolve.py:TestResolveThreeWayConflict:31af9e151aa09280
+tests/test_resolve.py:TestResolveIdentifiers:2fbdc9e4a6b99575
+tests/test_resolve.py:TestResolveBlocksOnSourceConflicts:ebe146f8a2fb5402
+tests/test_resolve.py:TestResolveCli:59d6a16a0eba1f74
+tests/test_merge_driver.py:TestUnionMerge:70cc6cd33b59c6d4
+tests/test_merge_driver.py:TestRunMergeDriver:cc0a76b6d6e6274b
+tests/test_merge_integration.py:TestMergeWithoutDriver:6a8d3b7659642353
+tests/test_merge_integration.py:TestMergeWithDriver:3c23cf58f1c7f966
+tests/test_hook.py:TestInstallGitHooksIdempotent:f558b1a4b5428162
+tests/test_hook.py:TestMigrateOldHook:57455cf7618a47c2
