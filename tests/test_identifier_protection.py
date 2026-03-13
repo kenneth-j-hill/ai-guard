@@ -149,8 +149,8 @@ class TestIdentifierProtection:
         guard.add_identifier("sample.py", "another_function")
         assert len(guard.entries) == 2
 
-        count = guard.remove("sample.py", "simple_function")
-        assert count == 1
+        removed = guard.remove("sample.py", "simple_function")
+        assert len(removed) == 1
         assert len(guard.entries) == 1
         assert guard.entries[0].identifier == "another_function"
 

@@ -119,8 +119,8 @@ class TestWholeFileProtection:
         guard.add_file("config.py")
         assert len(guard.entries) == 1
 
-        count = guard.remove("config.py")
-        assert count == 1
+        removed = guard.remove("config.py")
+        assert len(removed) == 1
         assert len(guard.entries) == 0
 
     def test_add_file_skips_existing(self, temp_project):
