@@ -1,9 +1,9 @@
-.ai-guard:37ed32836c63bad4
+.ai-guard:283bc35ebc680cf7
 tests/test_cli.py:TestVerifyCommand:00efa4b26f55eb81
 tests/test_cli.py:TestUpdateCommand:dced022560f6858e
 tests/test_cli.py:TestRemoveCommand:f6c60ef5a3c29574
 tests/test_cli.py:TestListCommand:2029489525174033
-tests/test_file_protection.py:TestWholeFileProtection:592aa2f78ebe1af9
+tests/test_file_protection.py:TestWholeFileProtection:8b366293e8685390
 tests/test_file_protection.py:TestSelfProtection:d12a034131469910
 tests/test_gcc_parser.py:TestGCCParserRegistration:3802b48eb13fda46
 tests/test_gcc_parser.py:TestGCCParserFunctions:faa21b711dcc03c5
@@ -15,7 +15,7 @@ tests/test_gcc_parser.py:TestGPPParserCppFeatures:5b9a7afe9c3f927f
 tests/test_hash_computation.py:TestFileHashing:0392cd87c5f73773
 tests/test_hash_computation.py:TestIdentifierHashing:64634d017a2c4af2
 tests/test_hook.py:TestHookBehavior:1fe1c736a40c7a32
-tests/test_identifier_protection.py:TestIdentifierProtection:bd16c0f365b753e7
+tests/test_identifier_protection.py:TestIdentifierProtection:1f6943dc6a5493d9
 tests/test_identifier_protection.py:TestDecoratedIdentifiers:356c32f15be48c02
 tests/test_parser_interface.py:TestParserInterface:6ae28290ecf5b2a8
 tests/test_parser_interface.py:TestParserRegistry:7562056ace0e5575
