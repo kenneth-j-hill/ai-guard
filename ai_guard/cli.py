@@ -683,7 +683,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     """Main entry point for the CLI."""
     parser = argparse.ArgumentParser(
         prog="ai-guard",
-        description="Protect code from incidental modifications by an AI",
+        description=f"ai-guard {__import__('ai_guard').__version__} — Protect code from incidental modifications by an AI",
         epilog="Run 'ai-guard <command> --help' for help on a specific command.",
     )
     parser.add_argument(

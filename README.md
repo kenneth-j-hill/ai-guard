@@ -95,8 +95,8 @@ ai-guard add src/auth.py src/billing.py:calculate_tax
 # Use glob patterns (quote to prevent shell expansion)
 ai-guard add "src/*.py" "tests/*.py:test_*"
 
-# Install the git pre-commit hook
-ai-guard install-hook
+# Install git hooks and merge driver
+ai-guard install-git-hooks
 ```
 
 Now if anyone (human or AI) tries to commit changes to protected code, the commit will be blocked:
@@ -179,9 +179,19 @@ Show all protected entries.
 
 Check all protected code for modifications. Returns exit code 1 if any protected code has changed.
 
-### `ai-guard install-hook`
+### `ai-guard resolve`
 
-Install a git pre-commit hook that runs `ai-guard verify` before each commit.
+Resolve `.ai-guard` after a merge. Recomputes all hashes from the current source tree and removes entries whose files or identifiers no longer exist.
+
+Because the user performed the merge and resolved any source conflicts, `resolve` treats the merged source as approved. Source files with merge conflict markers will block resolution — resolve those conflicts first.
+
+### `ai-guard install-git-hooks`
+
+Interactively install git hooks and merge configuration. Each item is shown with its content and you are prompted before installation:
+
+- **pre-commit** — runs `ai-guard verify` before each commit
+- **post-merge** — runs `ai-guard resolve` after a merge completes
+- **merge-driver** — configures a custom merge driver that prevents conflicts in `.ai-guard` by keeping all entries from both sides, then letting `post-merge` recompute hashes
 
 ## Global Options
 
@@ -242,6 +252,24 @@ For **class members** (methods, properties, class variables): the same as identi
 
 This means changing any of these will trigger a protection violation.
 
+## Git Merge Integration
+
+AI-Guard can integrate with git to handle `.ai-guard` file conflicts automatically during merges:
+
+```bash
+ai-guard install-git-hooks
+```
+
+This sets up three components:
+
+1. **Custom merge driver** — prevents merge conflicts in `.ai-guard` by performing a union merge (keeps all entries from both sides, deduplicates by target+hash)
+2. **Post-merge hook** — runs `ai-guard resolve` after every merge, recomputing hashes to match the merged source tree and removing stale entries
+3. **Pre-commit hook** — blocks commits when protected code has been modified without updating hashes
+
+With all three installed, merging branches that both modify protected code "just works" — no manual `.ai-guard` conflict resolution needed.
+
+If you don't install the merge driver and encounter a conflict in `.ai-guard`, run `ai-guard resolve` after resolving source conflicts to recompute all hashes.
+
 ## Hardening Protection
 
 The pre-commit hook alone only catches incidental modifications. An AI with commit permissions that sees the hook failure message could follow its instructions to run `ai-guard update` and recommit. For effective protection, you must also block the bypass commands.
@@ -266,7 +294,7 @@ The critical step is preventing the AI from running `ai-guard update` or `ai-gua
 Add the following to your project `CLAUDE.md` (or your global `~/.claude/CLAUDE.md`):
 
 ```
-NEVER modify, delete, or overwrite any file named `.ai-guard`. NEVER run `ai-guard update` or `ai-guard remove`.
+NEVER modify, delete, or overwrite any file named `.ai-guard`. NEVER run `ai-guard update`, `ai-guard remove`, or `ai-guard resolve`.
 ```
 
 Then add permission denials to `.claude/settings.json` as a secondary safeguard:
@@ -277,6 +305,7 @@ Then add permission denials to `.claude/settings.json` as a secondary safeguard:
     "deny": [
       "Bash(ai-guard update*)",
       "Bash(ai-guard remove*)",
+      "Bash(ai-guard resolve*)",
       "Edit(.ai-guard)",
       "Write(.ai-guard)"
     ]
@@ -290,11 +319,12 @@ The `CLAUDE.md` instruction is the primary protection because it works regardles
 
 Add a prohibition statement to the AI tool's system prompt or project instructions:
 
-> NEVER modify, delete, or overwrite any file named `.ai-guard`. NEVER run `ai-guard update` or `ai-guard remove`.
+> NEVER modify, delete, or overwrite any file named `.ai-guard`. NEVER run `ai-guard update`, `ai-guard remove`, or `ai-guard resolve`.
 
 If the tool supports permission denials, also block commands matching:
 - `ai-guard update`
 - `ai-guard remove`
+- `ai-guard resolve`
 - Direct writes to `.ai-guard`
 
 With bypass commands blocked, the AI cannot resolve protection violations, and the commit will fail. A human must review the change and explicitly run `ai-guard update` to approve it.
