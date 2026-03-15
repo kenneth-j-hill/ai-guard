@@ -81,6 +81,40 @@ class TestUnionMerge:
         assert result[0].path == "a.py"
         assert result[1].path == "b.py"
 
+    def test_strips_self_protection_from_both_sides(self):
+        """Self-protection entries with different hashes should not produce duplicates."""
+        ours = [
+            ProtectedEntry(path=".ai-guard", identifier=None, hash="aaaa111122223333"),
+            ProtectedEntry(path="auth.py", identifier="login", hash="bbbb444455556666"),
+        ]
+        theirs = [
+            ProtectedEntry(path=".ai-guard", identifier=None, hash="cccc777788889999"),
+            ProtectedEntry(path="billing.py", identifier="charge", hash="dddd000011112222"),
+        ]
+        result = union_merge(ours, theirs)
+        ai_guard_entries = [e for e in result if e.path == ".ai-guard"]
+        assert len(ai_guard_entries) == 0, (
+            f"Self-protection entries should be stripped, got {len(ai_guard_entries)}"
+        )
+        assert len(result) == 2
+        paths = {e.path for e in result}
+        assert paths == {"auth.py", "billing.py"}
+
+    def test_strips_identical_self_protection(self):
+        """Even identical self-protection entries are stripped."""
+        ours = [
+            ProtectedEntry(path=".ai-guard", identifier=None, hash="aaaa111122223333"),
+            ProtectedEntry(path="config.py", identifier=None, hash="bbbb444455556666"),
+        ]
+        theirs = [
+            ProtectedEntry(path=".ai-guard", identifier=None, hash="aaaa111122223333"),
+            ProtectedEntry(path="config.py", identifier=None, hash="bbbb444455556666"),
+        ]
+        result = union_merge(ours, theirs)
+        ai_guard_entries = [e for e in result if e.path == ".ai-guard"]
+        assert len(ai_guard_entries) == 0
+        assert len(result) == 1
+
 
 class TestRunMergeDriver:
     """Tests for the full merge driver execution."""

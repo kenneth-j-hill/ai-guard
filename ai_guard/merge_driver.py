@@ -47,17 +47,27 @@ def union_merge(ours: list[ProtectedEntry], theirs: list[ProtectedEntry]) -> lis
     Returns:
         Merged list of entries.
     """
+    # Filter out .ai-guard self-protection entries — save() recomputes this.
+    # Without this, each branch's different self-protection hash produces
+    # duplicate .ai-guard lines in the merged output.
+    def is_self_protection(e: ProtectedEntry) -> bool:
+        return e.path == ".ai-guard" and e.identifier is None
+
     # Track what we already have by (path, identifier, hash)
     seen: set[tuple[str, Optional[str], str]] = set()
     result: list[ProtectedEntry] = []
 
     for entry in ours:
+        if is_self_protection(entry):
+            continue
         key = (entry.path, entry.identifier, entry.hash)
         if key not in seen:
             seen.add(key)
             result.append(entry)
 
     for entry in theirs:
+        if is_self_protection(entry):
+            continue
         key = (entry.path, entry.identifier, entry.hash)
         if key not in seen:
             seen.add(key)
