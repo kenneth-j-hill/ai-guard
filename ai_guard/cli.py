@@ -395,6 +395,10 @@ _END_MARKER = "# --- end ai-guard ---"
 
 _PRE_COMMIT_SECTION = """\
 # --- ai-guard pre-commit ---
+if ! command -v ai-guard >/dev/null 2>&1; then
+    echo "Warning: ai-guard not found on PATH, skipping verify"
+    exit 0
+fi
 ai-guard verify
 if [ $? -ne 0 ]; then
     echo ""
@@ -406,6 +410,10 @@ fi
 
 _POST_MERGE_SECTION = """\
 # --- ai-guard post-merge ---
+if ! command -v ai-guard >/dev/null 2>&1; then
+    echo "Warning: ai-guard not found on PATH, skipping resolve"
+    exit 0
+fi
 ai-guard resolve
 if [ $? -ne 0 ]; then
     echo ""
@@ -417,6 +425,10 @@ fi
 _MERGE_DRIVER_SCRIPT = """\
 #!/bin/sh
 # ai-guard merge driver — union merge for .ai-guard files
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "Warning: python3 not found on PATH, falling back to default merge"
+    exit 1
+fi
 python3 -c "
 from ai_guard.merge_driver import run_merge_driver
 import sys
