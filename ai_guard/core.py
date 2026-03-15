@@ -19,6 +19,11 @@ class ProtectedEntry:
     identifier: Optional[str]  # None for whole-file protection
     hash: str
 
+    @property
+    def is_self_protection(self) -> bool:
+        """Whether this is the .ai-guard self-protection entry."""
+        return self.path == ".ai-guard" and self.identifier is None
+
     def to_line(self) -> str:
         """Convert to a line in the .ai-guard file."""
         if self.identifier:
@@ -167,7 +172,7 @@ class GuardFile:
         self._ensure_self_protection()
 
         # Build content excluding self-protection line for hash computation
-        other_entries = [e for e in self.entries if not (e.path == ".ai-guard" and e.identifier is None)]
+        other_entries = [e for e in self.entries if not e.is_self_protection]
         other_lines = [entry.to_line() for entry in other_entries]
         content_to_hash = "\n".join(other_lines) + "\n" if other_lines else ""
 
@@ -176,7 +181,7 @@ class GuardFile:
 
         # Update the self-protection entry with the computed hash
         for i, entry in enumerate(self.entries):
-            if entry.path == ".ai-guard" and entry.identifier is None:
+            if entry.is_self_protection:
                 self.entries[i] = ProtectedEntry(
                     path=".ai-guard", identifier=None, hash=self_hash
                 )
@@ -189,7 +194,7 @@ class GuardFile:
     def _ensure_self_protection(self) -> None:
         """Ensure .ai-guard file is in the protection list."""
         for entry in self.entries:
-            if entry.path == ".ai-guard" and entry.identifier is None:
+            if entry.is_self_protection:
                 return
 
         # Add self-protection entry with placeholder hash (will be computed in save())
@@ -351,8 +356,7 @@ class GuardFile:
                     failures.append((entry, "identifier not found"))
                 elif current_hash != entry.hash:
                     failures.append((entry, "hash mismatch"))
-            elif entry.path == ".ai-guard":
-                # Self-protection: hash is of entries excluding the self-protection line
+            elif entry.is_self_protection:
                 current_hash = self._compute_self_protection_hash()
                 if current_hash != entry.hash:
                     failures.append((entry, "hash mismatch"))
@@ -379,7 +383,7 @@ class GuardFile:
             if entry:
                 disk_entries.append(entry)
 
-        other_entries = [e for e in disk_entries if not (e.path == ".ai-guard" and e.identifier is None)]
+        other_entries = [e for e in disk_entries if not e.is_self_protection]
         other_lines = [entry.to_line() for entry in other_entries]
         content_to_hash = "\n".join(other_lines) + "\n" if other_lines else ""
         return compute_hash(content_to_hash)
@@ -431,7 +435,7 @@ class GuardFile:
         # Recompute hashes from working tree
         resolved = []
         for (path, identifier), entry in seen.items():
-            if path == ".ai-guard" and identifier is None:
+            if entry.is_self_protection:
                 continue  # Self-protection is handled by save()
 
             filepath = self.root / path
