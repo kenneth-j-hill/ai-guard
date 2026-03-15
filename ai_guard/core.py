@@ -2,9 +2,13 @@
 
 import fnmatch
 import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+# Conflict marker patterns (git 2-way and 3-way/diff3 styles)
+_CONFLICT_MARKER_RE = re.compile(r'^(<{7}|={7}|>{7}|\|{7})\s', re.MULTILINE)
 
 
 @dataclass
@@ -134,15 +138,21 @@ class GuardFile:
         self.root = root
         self.filepath = root / ".ai-guard"
         self.entries: list[ProtectedEntry] = []
+        self.has_conflicts: bool = False
         self._load()
 
     def _load(self) -> None:
         """Load entries from the .ai-guard file."""
         self.entries = []
+        self.has_conflicts = False
         if not self.filepath.exists():
             return
 
-        for line in self.filepath.read_text(encoding="utf-8").splitlines():
+        content = self.filepath.read_text(encoding="utf-8")
+        if _CONFLICT_MARKER_RE.search(content):
+            self.has_conflicts = True
+
+        for line in content.splitlines():
             entry = ProtectedEntry.from_line(line)
             if entry:
                 self.entries.append(entry)
@@ -373,6 +383,96 @@ class GuardFile:
         other_lines = [entry.to_line() for entry in other_entries]
         content_to_hash = "\n".join(other_lines) + "\n" if other_lines else ""
         return compute_hash(content_to_hash)
+
+    def resolve(self) -> tuple[list[ProtectedEntry], list[str]]:
+        """Resolve .ai-guard after a merge.
+
+        Parses all entries (including those inside conflict marker regions),
+        deduplicates by target, and recomputes hashes from the working tree.
+        Entries whose files or identifiers no longer exist are dropped.
+
+        Because the user performed the merge and resolved source conflicts,
+        running resolve treats the merged source as approved.
+
+        Returns:
+            Tuple of (resolved_entries, conflicted_files).
+            If conflicted_files is non-empty, resolution was blocked because
+            guarded source files still contain merge conflict markers.
+        """
+        # Parse all entries from raw content, stripping conflict markers
+        raw_entries = self._parse_all_entries()
+
+        # Find unique guarded source files (files with identifier entries)
+        guarded_files: set[str] = set()
+        for entry in raw_entries:
+            if entry.identifier and entry.path != ".ai-guard":
+                guarded_files.add(entry.path)
+
+        # Check guarded files for conflict markers
+        conflicted_files = []
+        for path in sorted(guarded_files):
+            filepath = self.root / path
+            if filepath.exists():
+                content = filepath.read_text(encoding="utf-8")
+                if _CONFLICT_MARKER_RE.search(content):
+                    conflicted_files.append(path)
+
+        if conflicted_files:
+            return [], conflicted_files
+
+        # Deduplicate by target (path + identifier)
+        seen: dict[tuple[str, Optional[str]], ProtectedEntry] = {}
+        for entry in raw_entries:
+            key = (entry.path, entry.identifier)
+            if key not in seen:
+                seen[key] = entry
+            # Duplicates are fine — we'll recompute anyway
+
+        # Recompute hashes from working tree
+        resolved = []
+        for (path, identifier), entry in seen.items():
+            if path == ".ai-guard" and identifier is None:
+                continue  # Self-protection is handled by save()
+
+            filepath = self.root / path
+            if not filepath.exists():
+                continue  # File gone — drop entry
+
+            if identifier:
+                new_hash = compute_identifier_hash(filepath, identifier)
+                if new_hash is None:
+                    continue  # Identifier gone — drop entry
+                resolved.append(ProtectedEntry(path=path, identifier=identifier, hash=new_hash))
+            else:
+                new_hash = compute_file_hash(filepath)
+                resolved.append(ProtectedEntry(path=path, identifier=None, hash=new_hash))
+
+        self.entries = resolved
+        self.has_conflicts = False
+        return resolved, []
+
+    def _parse_all_entries(self) -> list[ProtectedEntry]:
+        """Parse all entries from .ai-guard, stripping conflict markers.
+
+        Handles both clean files and files with 2-way or 3-way (diff3)
+        conflict markers.
+        """
+        if not self.filepath.exists():
+            return []
+
+        entries = []
+        for line in self.filepath.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            # Skip conflict marker lines
+            if (stripped.startswith("<<<<<<<") or
+                    stripped.startswith("=======") or
+                    stripped.startswith(">>>>>>>") or
+                    stripped.startswith("|||||||")):
+                continue
+            entry = ProtectedEntry.from_line(line)
+            if entry:
+                entries.append(entry)
+        return entries
 
     def list_entries(self) -> list[ProtectedEntry]:
         """List all protected entries.
