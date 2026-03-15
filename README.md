@@ -160,7 +160,10 @@ ai-guard update path/to/file.py
 ai-guard update path/to/file.py:my_function
 ai-guard update "src/*.py"
 ai-guard update --all
+ai-guard update --all --prune
 ```
+
+Use `--prune` with `--all` to remove entries whose files or identifiers no longer exist.
 
 ### `ai-guard remove <target> [target ...]`
 

@@ -236,6 +236,84 @@ class TestResolveBlocksOnSourceConflicts:
         assert len(resolved) == 1
 
 
+class TestResolveUnionMerge:
+    """Resolve after a union merge that combined .ai-guard from two branches."""
+
+    def test_union_merge_no_duplicate_self_protection(self, temp_project):
+        """Union merge produces duplicate .ai-guard lines; resolve should produce exactly one."""
+        # Create source files that both branches protected
+        (temp_project / "auth.py").write_text("def login(): pass\n", encoding="utf-8")
+        (temp_project / "billing.py").write_text("def charge(): pass\n", encoding="utf-8")
+        (temp_project / "config.py").write_text("SECRET = 42\n", encoding="utf-8")
+
+        # Simulate union merge output: .ai-guard self-protection from both sides
+        # plus entries from each branch, interleaved with self-protection lines
+        content = (
+            ".ai-guard:aaaa111122223333\n"
+            "auth.py:login:bbbb111122223333\n"
+            "config.py:cccc111122223333\n"
+            ".ai-guard:dddd111122223333\n"
+            "billing.py:charge:eeee111122223333\n"
+        )
+        (temp_project / ".ai-guard").write_text(content, encoding="utf-8")
+
+        guard = GuardFile(temp_project)
+        resolved, conflicted = guard.resolve()
+        assert conflicted == []
+        guard.save()
+
+        # Read the saved file and count .ai-guard entries
+        saved = (temp_project / ".ai-guard").read_text(encoding="utf-8")
+        lines = [l for l in saved.splitlines() if l.strip()]
+        ai_guard_lines = [l for l in lines if l.startswith(".ai-guard:")]
+        assert len(ai_guard_lines) == 1, (
+            f"Expected exactly 1 .ai-guard self-protection line, got {len(ai_guard_lines)}:\n{saved}"
+        )
+
+    def test_union_merge_preserves_all_real_entries(self, temp_project):
+        """Union merge entries from both branches are all preserved after resolve."""
+        (temp_project / "auth.py").write_text("def login(): pass\n", encoding="utf-8")
+        (temp_project / "billing.py").write_text("def charge(): pass\n", encoding="utf-8")
+
+        # Simulate union merge: entries from branch A and branch B
+        content = (
+            ".ai-guard:aaaa111122223333\n"
+            "auth.py:login:bbbb111122223333\n"
+            ".ai-guard:dddd111122223333\n"
+            "billing.py:charge:eeee111122223333\n"
+        )
+        (temp_project / ".ai-guard").write_text(content, encoding="utf-8")
+
+        guard = GuardFile(temp_project)
+        resolved, conflicted = guard.resolve()
+        assert conflicted == []
+        guard.save()
+
+        saved = (temp_project / ".ai-guard").read_text(encoding="utf-8")
+        assert "auth.py:login:" in saved
+        assert "billing.py:charge:" in saved
+
+    def test_union_merge_self_protection_at_top(self, temp_project):
+        """After resolving a union merge, .ai-guard self-protection is the first line."""
+        (temp_project / "auth.py").write_text("def login(): pass\n", encoding="utf-8")
+
+        content = (
+            "auth.py:login:bbbb111122223333\n"
+            ".ai-guard:aaaa111122223333\n"
+            ".ai-guard:dddd111122223333\n"
+        )
+        (temp_project / ".ai-guard").write_text(content, encoding="utf-8")
+
+        guard = GuardFile(temp_project)
+        resolved, conflicted = guard.resolve()
+        assert conflicted == []
+        guard.save()
+
+        saved = (temp_project / ".ai-guard").read_text(encoding="utf-8")
+        first_line = saved.splitlines()[0]
+        assert first_line.startswith(".ai-guard:"), f"First line should be self-protection, got: {first_line}"
+
+
 class TestResolveCli:
     """Tests for the 'resolve' CLI command."""
 

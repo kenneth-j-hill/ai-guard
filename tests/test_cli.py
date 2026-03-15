@@ -8,6 +8,7 @@ from pathlib import Path
 import os
 
 from ai_guard.cli import main, parse_target
+from ai_guard.core import GuardFile
 
 
 class TestParseTarget:
@@ -317,6 +318,89 @@ class TestUpdateCommand:
         assert result == 1
         captured = capsys.readouterr()
         assert "Must specify targets or use --all" in captured.err
+
+
+class TestUpdatePrune:
+    """Tests for 'ai-guard update --all --prune'."""
+
+    def test_prune_removes_missing_file(self, temp_project, monkeypatch, capsys):
+        """--prune removes entries for deleted files."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        main(["add", "config.py"])
+
+        filepath.unlink()
+        result = main(["update", "--all", "--prune"])
+        assert result == 0
+
+        captured = capsys.readouterr()
+        assert "Pruned config.py" in captured.out
+
+        guard = GuardFile(temp_project)
+        targets = [(e.path, e.identifier) for e in guard.list_entries()]
+        assert ("config.py", None) not in targets
+
+    def test_prune_removes_missing_identifier(self, temp_project, sample_python_file, monkeypatch, capsys):
+        """--prune removes entries for identifiers that no longer exist."""
+        monkeypatch.chdir(temp_project)
+        main(["add", "sample.py:simple_function"])
+        capsys.readouterr()  # clear output from add
+
+        # Remove the function from the file
+        sample_python_file.write_text("# empty\n", encoding="utf-8")
+        result = main(["update", "--all", "--prune"])
+        assert result == 0
+
+        captured = capsys.readouterr()
+        assert "Pruned sample.py:simple_function" in captured.out
+
+        guard = GuardFile(temp_project)
+        targets = [(e.path, e.identifier) for e in guard.list_entries()]
+        assert ("sample.py", "simple_function") not in targets
+
+    def test_prune_keeps_valid_entries(self, temp_project, sample_python_file, monkeypatch, capsys):
+        """--prune only removes stale entries, keeps valid ones."""
+        (temp_project / "config.py").write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        main(["add", "config.py"])
+        main(["add", "sample.py:simple_function"])
+
+        # Delete only config.py
+        (temp_project / "config.py").unlink()
+        result = main(["update", "--all", "--prune"])
+        assert result == 0
+
+        guard = GuardFile(temp_project)
+        targets = [(e.path, e.identifier) for e in guard.list_entries()]
+        assert ("config.py", None) not in targets
+        assert ("sample.py", "simple_function") in targets
+
+    def test_prune_without_all_fails(self, temp_project, monkeypatch, capsys):
+        """--prune without --all is an error."""
+        monkeypatch.chdir(temp_project)
+        result = main(["update", "--prune", "config.py"])
+        assert result == 1
+
+        captured = capsys.readouterr()
+        assert "--prune can only be used with --all" in captured.err
+
+    def test_prune_porcelain_output(self, temp_project, monkeypatch, capsys):
+        """--prune with --porcelain outputs pruned targets."""
+        filepath = temp_project / "config.py"
+        filepath.write_text("SECRET = 42\n", encoding="utf-8")
+
+        monkeypatch.chdir(temp_project)
+        main(["add", "config.py"])
+
+        filepath.unlink()
+        result = main(["--porcelain", "update", "--all", "--prune"])
+        assert result == 0
+
+        captured = capsys.readouterr()
+        assert "config.py" in captured.out
 
 
 class TestRemoveCommand:

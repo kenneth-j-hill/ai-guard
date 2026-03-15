@@ -1,11 +1,17 @@
 """Command-line interface for ai-guard."""
 
 import argparse
+import re
 import sys
 from pathlib import Path
 from typing import Optional
 
 from ai_guard.core import GuardFile
+
+# Pre-compiled regex for parse_target() — matches known file extensions followed by colon
+_TARGET_EXT_RE = re.compile(
+    r"(\.(?:py|pyw|js|jsx|ts|tsx|cpp|c|h|hpp|cc|cxx|hxx|rs)):"
+)
 
 
 # Module-level flags, set by main() before dispatching to commands.
@@ -28,6 +34,12 @@ def pprint(line: str) -> None:
 def entry_target(entry) -> str:
     """Format an entry as a bare target string for porcelain output."""
     return f"{entry.path}:{entry.identifier}" if entry.identifier else entry.path
+
+
+def format_entry(entry) -> str:
+    """Format an entry for human-readable display (target + hash)."""
+    target = entry_target(entry)
+    return f"{target} ({entry.hash})"
 
 
 def _check_conflicts(guard: GuardFile) -> bool:
@@ -85,10 +97,7 @@ def parse_target(target: str) -> tuple[str, Optional[str]]:
 
     # Look for known file extensions followed by colon, or glob patterns ending
     # in a known extension followed by colon (e.g., "*.py:" or "test_*.py:")
-    import re
-    extensions = r"\.(?:py|pyw|js|jsx|ts|tsx|cpp|c|h|hpp|cc|cxx|hxx|rs)"
-    # Match extension (possibly followed by glob chars) then colon
-    match = re.search(rf"({extensions}):", target)
+    match = _TARGET_EXT_RE.search(target)
     if match:
         idx = match.end() - 1  # Position of the colon
         path = target[:idx]
@@ -158,19 +167,19 @@ def cmd_add(args: argparse.Namespace) -> int:
                 if identifier:
                     added, skipped = guard.add_identifier(path, identifier)
                     for entry in added:
-                        qprint(f"Protected {entry.path}:{entry.identifier} ({entry.hash})")
+                        qprint(f"Protected {format_entry(entry)}")
                         pprint(entry_target(entry))
                         any_success = True
                     for entry in skipped:
-                        qprint(f"Already protected: {entry.path}:{entry.identifier} ({entry.hash})")
+                        qprint(f"Already protected: {format_entry(entry)}")
                 else:
                     added, skipped = guard.add_file(path)
                     if added:
-                        qprint(f"Protected {added.path} ({added.hash})")
+                        qprint(f"Protected {format_entry(added)}")
                         pprint(entry_target(added))
                         any_success = True
                     if skipped:
-                        qprint(f"Already protected: {skipped.path} ({skipped.hash})")
+                        qprint(f"Already protected: {format_entry(skipped)}")
             except FileNotFoundError:
                 print(f"Error: File not found: {path}", file=sys.stderr)
                 any_error = True
@@ -195,6 +204,9 @@ def cmd_update(args: argparse.Namespace) -> int:
     if not args.all and not args.targets:
         print("Error: Must specify targets or use --all", file=sys.stderr)
         return 1
+    if args.prune and not args.all:
+        print("Error: --prune can only be used with --all", file=sys.stderr)
+        return 1
 
     root = find_project_root()
     guard = GuardFile(root)
@@ -213,7 +225,7 @@ def cmd_update(args: argparse.Namespace) -> int:
 
         for entry in existing_entries:
             # Skip self-protection entry - it's computed automatically
-            if entry.path == ".ai-guard" and entry.identifier is None:
+            if entry.is_self_protection:
                 continue
 
             old_hash = entry.hash
@@ -221,35 +233,41 @@ def cmd_update(args: argparse.Namespace) -> int:
                 updated = guard.update(entry.path, entry.identifier)
                 for upd in updated:
                     if upd.hash != old_hash:
-                        if upd.identifier:
-                            qprint(f"Updated {upd.path}:{upd.identifier} ({upd.hash})")
-                        else:
-                            qprint(f"Updated {upd.path} ({upd.hash})")
+                        qprint(f"Updated {format_entry(upd)}")
                         pprint(entry_target(upd))
                     any_success = True
             except FileNotFoundError:
                 target = entry_target(entry)
-                print(f"Error: File not found: {target}", file=sys.stderr)
-                print(f"  Run 'ai-guard remove {target}' to remove this entry.", file=sys.stderr)
-                any_error = True
+                if args.prune:
+                    guard.remove(entry.path, entry.identifier)
+                    qprint(f"Pruned {target} (file not found)")
+                    pprint(entry_target(entry))
+                    any_success = True
+                else:
+                    print(f"Error: File not found: {target}", file=sys.stderr)
+                    print(f"  Run 'ai-guard remove {target}' to remove this entry.", file=sys.stderr)
+                    any_error = True
             except ImportError as e:
                 print(f"Error: {e}", file=sys.stderr)
                 any_error = True
             except ValueError:
                 target = entry_target(entry)
-                print(f"Error: Identifier not found: {target}", file=sys.stderr)
-                print(f"  Run 'ai-guard remove {target}' to remove this entry.", file=sys.stderr)
-                any_error = True
+                if args.prune:
+                    guard.remove(entry.path, entry.identifier)
+                    qprint(f"Pruned {target} (identifier not found)")
+                    pprint(entry_target(entry))
+                    any_success = True
+                else:
+                    print(f"Error: Identifier not found: {target}", file=sys.stderr)
+                    print(f"  Run 'ai-guard remove {target}' to remove this entry.", file=sys.stderr)
+                    any_error = True
     else:
         for target in args.targets:
             for path, identifier in expand_glob_target(root, target):
                 try:
                     entries = guard.update(path, identifier)
                     for entry in entries:
-                        if entry.identifier:
-                            qprint(f"Updated {entry.path}:{entry.identifier} ({entry.hash})")
-                        else:
-                            qprint(f"Updated {entry.path} ({entry.hash})")
+                        qprint(f"Updated {format_entry(entry)}")
                         pprint(entry_target(entry))
                         any_success = True
                 except FileNotFoundError:
@@ -307,10 +325,8 @@ def cmd_list(args: argparse.Namespace) -> int:
     for entry in entries:
         if _porcelain:
             pprint(entry_target(entry))
-        elif entry.identifier:
-            qprint(f"{entry.path}:{entry.identifier} ({entry.hash})")
         else:
-            qprint(f"{entry.path} ({entry.hash})")
+            qprint(format_entry(entry))
 
     return 0
 
@@ -367,10 +383,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     guard.save()
 
     for entry in resolved:
-        if entry.identifier:
-            qprint(f"Resolved {entry.path}:{entry.identifier} ({entry.hash})")
-        else:
-            qprint(f"Resolved {entry.path} ({entry.hash})")
+        qprint(f"Resolved {format_entry(entry)}")
         pprint(entry_target(entry))
 
     qprint(f"Resolved {len(resolved)} entries")
@@ -382,6 +395,10 @@ _END_MARKER = "# --- end ai-guard ---"
 
 _PRE_COMMIT_SECTION = """\
 # --- ai-guard pre-commit ---
+if ! command -v ai-guard >/dev/null 2>&1; then
+    echo "Warning: ai-guard not found on PATH, skipping verify"
+    exit 0
+fi
 ai-guard verify
 if [ $? -ne 0 ]; then
     echo ""
@@ -393,6 +410,10 @@ fi
 
 _POST_MERGE_SECTION = """\
 # --- ai-guard post-merge ---
+if ! command -v ai-guard >/dev/null 2>&1; then
+    echo "Warning: ai-guard not found on PATH, skipping resolve"
+    exit 0
+fi
 ai-guard resolve
 if [ $? -ne 0 ]; then
     echo ""
@@ -404,6 +425,10 @@ fi
 _MERGE_DRIVER_SCRIPT = """\
 #!/bin/sh
 # ai-guard merge driver — union merge for .ai-guard files
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "Warning: python3 not found on PATH, falling back to default merge"
+    exit 1
+fi
 python3 -c "
 from ai_guard.merge_driver import run_merge_driver
 import sys
@@ -724,6 +749,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--all",
         action="store_true",
         help="Update all existing protected entries",
+    )
+    update_parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="With --all: remove entries whose files or identifiers no longer exist",
     )
     update_parser.add_argument(
         "targets",
