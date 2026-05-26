@@ -5,8 +5,11 @@ extract_identifier() and list_identifiers() methods.
 """
 
 import fnmatch
+import importlib.util
+import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 
@@ -112,8 +115,162 @@ def register_parser(extensions: list[str], parser_class: type[Parser]) -> None:
         _PARSER_REGISTRY[ext] = parser_class
 
 
+_external_parsers_loaded: set[str] = set()
+
+
+def read_external_extensions(start_dir: Path) -> list[str]:
+    """Read file extensions from a .ai-guard_parsers file without loading modules.
+
+    This is a lightweight alternative to load_external_parsers() that only
+    reads the extension declarations. Used by parse_target() to recognize
+    custom file extensions in target strings.
+
+    Args:
+        start_dir: Directory to start searching from.
+
+    Returns:
+        List of file extensions (e.g., ['.rule', '.go']).
+    """
+    parsers_file = _find_parsers_file(start_dir)
+    if parsers_file is None:
+        return []
+
+    extensions: list[str] = []
+    for raw_line in parsers_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split(":")
+        if len(parts) != 3:
+            continue
+        ext_str = parts[2]
+        for ext in ext_str.split(","):
+            ext = ext.strip()
+            if ext:
+                extensions.append(ext)
+    return extensions
+
+
+def _find_parsers_file(start_dir: Path) -> Optional[Path]:
+    """Walk up from start_dir looking for .ai-guard_parsers.
+
+    Args:
+        start_dir: Directory to start searching from.
+
+    Returns:
+        Path to the .ai-guard_parsers file, or None if not found.
+    """
+    current = start_dir.resolve()
+    while True:
+        candidate = current / ".ai-guard_parsers"
+        if candidate.is_file():
+            return candidate
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return None
+
+
+def load_external_parsers(start_dir: Path) -> list[str]:
+    """Load parsers from a .ai-guard_parsers file found in an ancestor directory.
+
+    The file format is one parser per line:
+        path:ClassName:extensions
+
+    Where:
+        - path is the Python file containing the parser class (absolute,
+          ~-relative, or relative to the directory containing .ai-guard_parsers)
+        - ClassName is the Parser subclass to load
+        - extensions is a comma-separated list of file extensions (e.g. .java,.jar)
+
+    Lines starting with # and blank lines are ignored.
+
+    Args:
+        start_dir: Directory to start searching from.
+
+    Returns:
+        List of error messages (empty if all parsers loaded successfully).
+    """
+    parsers_file = _find_parsers_file(start_dir)
+    if parsers_file is None:
+        return []
+
+    parsers_file_str = str(parsers_file)
+    if parsers_file_str in _external_parsers_loaded:
+        return []
+    _external_parsers_loaded.add(parsers_file_str)
+
+    base_dir = parsers_file.parent
+    errors: list[str] = []
+
+    for lineno, raw_line in enumerate(
+        parsers_file.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        parts = line.split(":")
+        if len(parts) != 3:
+            errors.append(
+                f"{parsers_file}:{lineno}: expected 'path:ClassName:extensions', got: {line}"
+            )
+            continue
+
+        module_path_str, class_name, ext_str = parts
+        extensions = [e.strip() for e in ext_str.split(",") if e.strip()]
+        if not extensions:
+            errors.append(f"{parsers_file}:{lineno}: no extensions specified")
+            continue
+
+        # Resolve the module path
+        module_path = Path(module_path_str).expanduser()
+        if not module_path.is_absolute():
+            module_path = (base_dir / module_path).resolve()
+
+        if not module_path.is_file():
+            errors.append(f"{parsers_file}:{lineno}: file not found: {module_path}")
+            continue
+
+        # Load the module
+        module_name = f"_ai_guard_ext_{module_path.stem}"
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, module_path)
+            if spec is None or spec.loader is None:
+                errors.append(f"{parsers_file}:{lineno}: cannot load module: {module_path}")
+                continue
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+        except Exception as e:
+            errors.append(f"{parsers_file}:{lineno}: error loading {module_path}: {e}")
+            continue
+
+        # Get the parser class
+        parser_class = getattr(module, class_name, None)
+        if parser_class is None:
+            errors.append(
+                f"{parsers_file}:{lineno}: class '{class_name}' not found in {module_path}"
+            )
+            continue
+
+        if not (isinstance(parser_class, type) and issubclass(parser_class, Parser)):
+            errors.append(
+                f"{parsers_file}:{lineno}: {class_name} is not a Parser subclass"
+            )
+            continue
+
+        register_parser(extensions, parser_class)
+
+    return errors
+
+
 def get_parser_for_file(filepath: str) -> Optional[Parser]:
     """Get the appropriate parser for a file based on its extension.
+
+    On first call for a given .ai-guard_parsers file, loads any external
+    parsers defined there.
 
     Args:
         filepath: Path to the file.
@@ -122,9 +279,21 @@ def get_parser_for_file(filepath: str) -> Optional[Parser]:
         A parser instance if one is registered for the file extension,
         None otherwise.
     """
-    from pathlib import Path
-    ext = Path(filepath).suffix.lower()
+    file_path = Path(filepath)
+    ext = file_path.suffix.lower()
+
+    # Try built-in parsers first
     parser_class = _PARSER_REGISTRY.get(ext)
     if parser_class:
         return parser_class()
+
+    # Try loading external parsers from .ai-guard_parsers
+    start_dir = file_path.parent if file_path.parent.is_dir() else Path.cwd()
+    load_external_parsers(start_dir)
+
+    # Check again after loading externals
+    parser_class = _PARSER_REGISTRY.get(ext)
+    if parser_class:
+        return parser_class()
+
     return None
