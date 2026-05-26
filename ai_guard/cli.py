@@ -8,10 +8,16 @@ from typing import Optional
 
 from ai_guard.core import GuardFile
 
-# Pre-compiled regex for parse_target() — matches known file extensions followed by colon
-_TARGET_EXT_RE = re.compile(
-    r"(\.(?:py|pyw|js|jsx|ts|tsx|cpp|c|h|hpp|cc|cxx|hxx|rs)):"
-)
+# Built-in extensions recognized by parse_target(). Must stay in sync with the
+# register_parser(...) calls in each ai_guard.parsers.* module.
+_BUILTIN_EXTENSIONS = [
+    ".py", ".pyw",
+    ".cpp", ".c", ".h", ".hpp", ".cc", ".cxx", ".hxx", ".C", ".H",
+    ".rs",
+]
+
+# Cached regex for parse_target() — built lazily to include external extensions
+_target_ext_re: Optional[re.Pattern] = None
 
 
 # Module-level flags, set by main() before dispatching to commands.
@@ -79,6 +85,30 @@ def find_project_root(start: Optional[Path] = None) -> Path:
     return start.resolve()
 
 
+def _get_target_ext_re() -> re.Pattern:
+    """Build or return the cached regex for matching file extensions in targets.
+
+    Combines built-in extensions with any external extensions from
+    .ai-guard_parsers files found in ancestor directories.
+    """
+    global _target_ext_re
+    if _target_ext_re is not None:
+        return _target_ext_re
+
+    from ai_guard.parsers.base import read_external_extensions
+
+    all_extensions = list(_BUILTIN_EXTENSIONS)
+    external = read_external_extensions(Path.cwd())
+    for ext in external:
+        if ext not in all_extensions:
+            all_extensions.append(ext)
+
+    # Build pattern: escape dots, join with |
+    escaped = [re.escape(ext) for ext in all_extensions]
+    _target_ext_re = re.compile(r"(" + "|".join(escaped) + r"):")
+    return _target_ext_re
+
+
 def parse_target(target: str) -> tuple[str, Optional[str]]:
     """Parse a target string into path and optional identifier.
 
@@ -97,7 +127,7 @@ def parse_target(target: str) -> tuple[str, Optional[str]]:
 
     # Look for known file extensions followed by colon, or glob patterns ending
     # in a known extension followed by colon (e.g., "*.py:" or "test_*.py:")
-    match = _TARGET_EXT_RE.search(target)
+    match = _get_target_ext_re().search(target)
     if match:
         idx = match.end() - 1  # Position of the colon
         path = target[:idx]
@@ -709,7 +739,35 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="ai-guard",
         description=f"ai-guard {__import__('ai_guard').__version__} — Protect code from incidental modifications by an AI",
-        epilog="Run 'ai-guard <command> --help' for help on a specific command.",
+        epilog=(
+            "AI assistant guidelines\n"
+            "-----------------------\n"
+            "ai-guard is designed to be read and used by AI coding assistants as well\n"
+            "as humans. If you are an AI assistant, follow these rules:\n"
+            "\n"
+            "  DO use 'ai-guard add' to mark new code (e.g., new test classes or\n"
+            "  methods) for protection. This is additive and safe.\n"
+            "\n"
+            "  DO use 'ai-guard verify' and 'ai-guard list' freely. They are\n"
+            "  read-only.\n"
+            "\n"
+            "  DO NOT run 'ai-guard update', 'ai-guard remove', or 'ai-guard\n"
+            "  resolve'. All three change protections without human approval.\n"
+            "  'resolve' is automatically invoked by the post-merge git hook after\n"
+            "  a human-initiated merge — that is its only legitimate context.\n"
+            "  If you believe any of these need to run, surface the intent to the\n"
+            "  human and let them decide.\n"
+            "\n"
+            "  DO NOT modify, delete, or overwrite the .ai-guard file directly.\n"
+            "  Use the CLI; manual edits are detected as tampering.\n"
+            "\n"
+            "  For test files, guard individual test classes or methods rather than\n"
+            "  the whole file (e.g., 'ai-guard add tests/test_x.py:TestFoo') so new\n"
+            "  tests can be added without re-approving the entire file.\n"
+            "\n"
+            "Run 'ai-guard <command> --help' for help on a specific command."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--version",
@@ -731,7 +789,17 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # add command
     add_parser = subparsers.add_parser(
-        "add", help="Add protection for a file or identifier"
+        "add",
+        help="Add protection for a file or identifier",
+        description=(
+            "Add protection for one or more files or identifiers. The current contents\n"
+            "are hashed and the hash is recorded in .ai-guard. Subsequent modifications\n"
+            "will be detected by 'ai-guard verify' and blocked by the pre-commit hook.\n"
+            "\n"
+            "Accepts multiple targets and glob patterns. Adding an already-protected\n"
+            "target is a no-op."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     add_parser.add_argument(
         "targets",
@@ -743,7 +811,21 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # update command
     update_parser = subparsers.add_parser(
-        "update", help="Update the hash for a protected entry"
+        "update",
+        help="Update the hash for a protected entry",
+        description=(
+            "Recompute the stored hash for one or more protected entries after\n"
+            "intentionally modifying their source. Use --all to refresh every entry\n"
+            "in .ai-guard at once, optionally with --prune to drop entries whose\n"
+            "files or identifiers no longer exist.\n"
+            "\n"
+            "Warning for AI assistants: do not run this command. 'update' approves\n"
+            "changes to protected code without human review — it is the primary\n"
+            "bypass that ai-guard exists to prevent. If protected code was modified\n"
+            "and needs to be re-approved, surface that to the human and let them\n"
+            "run 'ai-guard update' themselves."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     update_parser.add_argument(
         "--all",
@@ -765,7 +847,19 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # remove command
     remove_parser = subparsers.add_parser(
-        "remove", help="Remove protection for a file or identifier"
+        "remove",
+        help="Remove protection for a file or identifier",
+        description=(
+            "Remove one or more entries from .ai-guard. The source code is not\n"
+            "touched — only the protection record is dropped. Accepts multiple\n"
+            "targets and glob patterns.\n"
+            "\n"
+            "Warning for AI assistants: do not run this command. 'remove' strips\n"
+            "protection entirely without human review, defeating the purpose of\n"
+            "the tool. If an entry should be unprotected, surface that to the\n"
+            "human and let them run 'ai-guard remove' themselves."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     remove_parser.add_argument(
         "targets",
@@ -776,11 +870,30 @@ def main(argv: Optional[list[str]] = None) -> int:
     remove_parser.set_defaults(func=cmd_remove)
 
     # list command
-    list_parser = subparsers.add_parser("list", help="List all protected entries")
+    list_parser = subparsers.add_parser(
+        "list",
+        help="List all protected entries",
+        description=(
+            "Print every entry currently in .ai-guard, one per line, as\n"
+            "'target (hash)'. With --porcelain, prints bare targets only (no\n"
+            "hashes) so output can be piped to xargs. Read-only."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     list_parser.set_defaults(func=cmd_list)
 
     # verify command
-    verify_parser = subparsers.add_parser("verify", help="Verify all protected entries")
+    verify_parser = subparsers.add_parser(
+        "verify",
+        help="Verify all protected entries",
+        description=(
+            "Recompute hashes for every entry in .ai-guard and compare against the\n"
+            "stored values. Prints any mismatches and exits non-zero if any are\n"
+            "found. This is what the pre-commit hook runs. Read-only — never\n"
+            "modifies .ai-guard or any source file."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     verify_parser.set_defaults(func=cmd_verify)
 
     # resolve command

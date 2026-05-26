@@ -6,7 +6,7 @@ import sys
 
 
 def main():
-    result = subprocess.run([sys.executable, "-m", "ai_guard.cli", "install-hook"])
+    result = subprocess.run([sys.executable, "-m", "ai_guard.cli", "install-git-hooks"])
     return result.returncode
 
 

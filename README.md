@@ -10,7 +10,7 @@ When working with AI coding assistants, certain code should never be modified wi
 
 - **Visibility** - Make it obvious when protected code has been changed, whether intentionally or accidentally
 - **Speed bumps, not walls** - Create friction that catches incidental modifications before they're committed
-- **Human-in-the-loop** - Require explicit human action (`ai-guard update`) to approve changes to protected code
+- **Human-in-the-loop** - Require explicit human action (`ai-guard update`, `remove`, `resolve`) to approve changes to protected code
 
 ### Non-goals
 
@@ -22,6 +22,18 @@ When working with AI coding assistants, certain code should never be modified wi
 
 THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. AI-Guard is a development tool designed to reduce accidental modifications, not a security product. It can be bypassed and should not be relied upon as your only safeguard. Always use proper code review, version control, backups, and security practices. The authors are not liable for any damages arising from the use of this software or from modifications to code that was intended to be protected. See the LICENSE file for full terms.
 
+## AI Assistant Guidelines
+
+AI-Guard is designed to be read and used by AI coding assistants as well as humans. If you are an AI assistant working in a project that uses AI-Guard, follow these rules. (The same guidance is shown in `ai-guard --help`.)
+
+- **DO** use `ai-guard add` to mark new code (e.g., new test classes or methods) for protection. This is additive and safe.
+- **DO** use `ai-guard verify` and `ai-guard list` freely. They are read-only.
+- **DO NOT** run `ai-guard update`, `ai-guard remove`, or `ai-guard resolve`. All three change protections without human approval. `resolve` is automatically invoked by the post-merge git hook after a human-initiated merge — that is its only legitimate context. If you believe any of these need to run, surface the intent to the human and let them decide.
+- **DO NOT** modify, delete, or overwrite the `.ai-guard` file directly. Use the CLI; manual edits are detected as tampering.
+- For test files, guard individual test classes or methods rather than the whole file (e.g., `ai-guard add tests/test_x.py:TestFoo`) so new tests can be added without re-approving the entire file.
+
+Project owners: see [Hardening Protection](#hardening-protection) below for how to enforce these rules in your AI tooling's configuration.
+
 ## Features
 
 - **File-level protection** - Protect entire files from modification
@@ -30,7 +42,7 @@ THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. AI-Guard is a d
 - **Wildcard patterns** - Protect groups of identifiers (e.g., `test_invariant_*`, `MyClass.*`)
 - **Git integration** - Pre-commit hook blocks commits that modify protected code
 - **Self-protection** - The `.ai-guard` file protects itself from tampering
-- **Extensible** - Pluggable parser system for language support (Python and C/C++ included)
+- **Extensible** - Pluggable parser system for language support (Python and C/C++ included, [custom parsers](PARSERS.md) via `.ai-guard_parsers`)
 
 ## Installation
 
@@ -219,16 +231,23 @@ ai-guard --porcelain add "src/*.py:test_*"
 
 Suppress all non-error output. Errors are still printed to stderr.
 
+### `--version`
+
+Print the installed `ai-guard` version and exit.
+
 ## The `.ai-guard` File
 
 Protection entries are stored in `.ai-guard` at the project root:
 
 ```
+.ai-guard:9a648b95d07f228d
 src/auth.py:8a3b2c1d4e5f6789
 src/billing.py:calculate_tax:1234567890abcdef
 tests/test_core.py:test_invariant_one:abcdef1234567890
 tests/test_core.py:test_invariant_two:fedcba0987654321
 ```
+
+The first line is the **self-protection entry**: a hash of the rest of the file that lets `ai-guard verify` detect tampering with `.ai-guard` itself. It is recomputed automatically and should not be edited by hand.
 
 Format:
 - `path:hash` - whole file protection
@@ -364,27 +383,9 @@ Supported Rust identifiers: `fn`, `struct`, `enum`, `trait`, `impl`, `const`, `s
 
 ## Adding Language Support
 
-AI-Guard has a pluggable parser system.
+AI-Guard has a pluggable parser system. You can add support for any language by creating a parser module and registering it via a `.ai-guard_parsers` file — no changes to ai-guard itself required.
 
-To add support for another language, create a parser that implements the `Parser` interface:
-
-```python
-from ai_guard.parsers.base import Parser, Identifier, register_parser
-
-class JavaScriptParser(Parser):
-    def extract_identifier(self, source: str, name: str) -> Optional[Identifier]:
-        # Parse source and find the identifier
-        ...
-
-    def list_identifiers(self, source: str) -> list[Identifier]:
-        # Return all top-level identifiers
-        ...
-
-# Register for file extensions
-register_parser(['.js', '.jsx'], JavaScriptParser)
-```
-
-See `ai_guard/parsers/python.py` for a complete example.
+See [PARSERS.md](PARSERS.md) for the full guide, including file format, the Parser interface, and a complete example.
 
 ## Development
 
