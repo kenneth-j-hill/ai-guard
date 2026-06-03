@@ -93,6 +93,6 @@ def run_merge_driver(ancestor_path: str, ours_path: str, theirs_path: str) -> in
     merged = union_merge(ours, theirs)
 
     lines = [entry.to_line() for entry in merged]
-    Path(ours_path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    Path(ours_path).write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
     return 0
