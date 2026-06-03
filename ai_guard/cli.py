@@ -455,11 +455,18 @@ fi
 _MERGE_DRIVER_SCRIPT = """\
 #!/bin/sh
 # ai-guard merge driver — union merge for .ai-guard files
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "Warning: python3 not found on PATH, falling back to default merge"
+PYTHON=
+for cmd in python3 python py; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+        PYTHON="$cmd"
+        break
+    fi
+done
+if [ -z "$PYTHON" ]; then
+    echo "Warning: no python interpreter found on PATH, falling back to default merge"
     exit 1
 fi
-python3 -c "
+"$PYTHON" -c "
 from ai_guard.merge_driver import run_merge_driver
 import sys
 sys.exit(run_merge_driver(sys.argv[1], sys.argv[2], sys.argv[3]))
@@ -653,6 +660,10 @@ def _install_merge_driver(root: Path, hooks_dir: Path) -> None:
     driver_path = hooks_dir / "ai-guard-merge-driver"
     gitattributes_path = root / ".gitattributes"
 
+    # Forward slashes survive sh's backslash-as-escape parsing on Windows;
+    # git on Windows accepts forward slashes in config values.
+    driver_path_posix = driver_path.as_posix()
+
     # Check current state
     driver_exists = driver_path.exists()
     driver_current = False
@@ -684,14 +695,14 @@ def _install_merge_driver(root: Path, hooks_dir: Path) -> None:
     # Show what will be changed
     changes = []
     if not driver_current:
-        changes.append(f"  Will install: {driver_path}")
+        changes.append(f"  Will install: {driver_path_posix}")
         print(f"\n  --- driver script ---")
         for line in _MERGE_DRIVER_SCRIPT.splitlines():
             print(f"  {line}")
     if not config_set:
         changes.append("  Will add to .git/config:")
         changes.append('    [merge "ai-guard"]')
-        changes.append(f"        driver = {driver_path} %O %A %B")
+        changes.append(f"        driver = {driver_path_posix} %O %A %B")
         changes.append('        name = ai-guard merge driver')
     if not attr_set:
         changes.append(f"  Will add to .gitattributes:")
@@ -715,7 +726,7 @@ def _install_merge_driver(root: Path, hooks_dir: Path) -> None:
     if not config_set:
         subprocess.run(
             ["git", "config", "--local", "merge.ai-guard.driver",
-             f"{driver_path} %O %A %B"],
+             f"{driver_path_posix} %O %A %B"],
             cwd=root, check=True,
         )
         subprocess.run(
