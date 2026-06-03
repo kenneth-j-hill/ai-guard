@@ -189,7 +189,7 @@ class GuardFile:
 
         # Write the complete file
         lines = [entry.to_line() for entry in self.entries]
-        self.filepath.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.filepath.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
     def _ensure_self_protection(self) -> None:
         """Ensure .ai-guard file is in the protection list."""

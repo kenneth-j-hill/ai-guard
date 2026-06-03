@@ -455,11 +455,18 @@ fi
 _MERGE_DRIVER_SCRIPT = """\
 #!/bin/sh
 # ai-guard merge driver — union merge for .ai-guard files
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "Warning: python3 not found on PATH, falling back to default merge"
+PYTHON=
+for cmd in python3 python py; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+        PYTHON="$cmd"
+        break
+    fi
+done
+if [ -z "$PYTHON" ]; then
+    echo "Warning: no python interpreter found on PATH, falling back to default merge"
     exit 1
 fi
-python3 -c "
+"$PYTHON" -c "
 from ai_guard.merge_driver import run_merge_driver
 import sys
 sys.exit(run_merge_driver(sys.argv[1], sys.argv[2], sys.argv[3]))
@@ -551,7 +558,7 @@ def _install_hook_section(hook_path: Path, section_name: str, section_content: s
             if not _prompt_user("  Replace?"):
                 return False
             new_content = existing[:start] + section_content + "\n" + existing[end:]
-            hook_path.write_text(new_content, encoding="utf-8")
+            hook_path.write_text(new_content, encoding="utf-8", newline="\n")
             hook_path.chmod(0o755)
             return True
 
@@ -573,7 +580,7 @@ def _install_hook_section(hook_path: Path, section_name: str, section_content: s
                 if not _prompt_user("  Replace?"):
                     return False
                 new_content = existing[:old_start] + section_content + "\n" + existing[old_end:]
-                hook_path.write_text(new_content, encoding="utf-8")
+                hook_path.write_text(new_content, encoding="utf-8", newline="\n")
                 hook_path.chmod(0o755)
                 return True
 
@@ -588,7 +595,7 @@ def _install_hook_section(hook_path: Path, section_name: str, section_content: s
         if not _prompt_user("  Install?"):
             return False
         new_content = existing.rstrip() + "\n\n" + section_content + "\n"
-        hook_path.write_text(new_content, encoding="utf-8")
+        hook_path.write_text(new_content, encoding="utf-8", newline="\n")
         hook_path.chmod(0o755)
         return True
     else:
@@ -602,7 +609,7 @@ def _install_hook_section(hook_path: Path, section_name: str, section_content: s
         if not _prompt_user("  Install?"):
             return False
         full_content = "#!/bin/sh\n" + section_content + "\n"
-        hook_path.write_text(full_content, encoding="utf-8")
+        hook_path.write_text(full_content, encoding="utf-8", newline="\n")
         hook_path.chmod(0o755)
         return True
 
@@ -653,6 +660,10 @@ def _install_merge_driver(root: Path, hooks_dir: Path) -> None:
     driver_path = hooks_dir / "ai-guard-merge-driver"
     gitattributes_path = root / ".gitattributes"
 
+    # Forward slashes survive sh's backslash-as-escape parsing on Windows;
+    # git on Windows accepts forward slashes in config values.
+    driver_path_posix = driver_path.as_posix()
+
     # Check current state
     driver_exists = driver_path.exists()
     driver_current = False
@@ -684,14 +695,14 @@ def _install_merge_driver(root: Path, hooks_dir: Path) -> None:
     # Show what will be changed
     changes = []
     if not driver_current:
-        changes.append(f"  Will install: {driver_path}")
+        changes.append(f"  Will install: {driver_path_posix}")
         print(f"\n  --- driver script ---")
         for line in _MERGE_DRIVER_SCRIPT.splitlines():
             print(f"  {line}")
     if not config_set:
         changes.append("  Will add to .git/config:")
         changes.append('    [merge "ai-guard"]')
-        changes.append(f"        driver = {driver_path} %O %A %B")
+        changes.append(f"        driver = {driver_path_posix} %O %A %B")
         changes.append('        name = ai-guard merge driver')
     if not attr_set:
         changes.append(f"  Will add to .gitattributes:")
@@ -708,14 +719,14 @@ def _install_merge_driver(root: Path, hooks_dir: Path) -> None:
 
     # Install driver script
     if not driver_current:
-        driver_path.write_text(_MERGE_DRIVER_SCRIPT, encoding="utf-8")
+        driver_path.write_text(_MERGE_DRIVER_SCRIPT, encoding="utf-8", newline="\n")
         driver_path.chmod(0o755)
 
     # Configure git
     if not config_set:
         subprocess.run(
             ["git", "config", "--local", "merge.ai-guard.driver",
-             f"{driver_path} %O %A %B"],
+             f"{driver_path_posix} %O %A %B"],
             cwd=root, check=True,
         )
         subprocess.run(
@@ -731,7 +742,7 @@ def _install_merge_driver(root: Path, hooks_dir: Path) -> None:
             content = content.rstrip() + "\n.ai-guard merge=ai-guard\n"
         else:
             content = ".ai-guard merge=ai-guard\n"
-        gitattributes_path.write_text(content, encoding="utf-8")
+        gitattributes_path.write_text(content, encoding="utf-8", newline="\n")
 
 
 def main(argv: Optional[list[str]] = None) -> int:
