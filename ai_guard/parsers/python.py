@@ -197,6 +197,50 @@ class PythonParser(Parser):
         # Fall back to base implementation for top-level identifiers
         return super().expand_identifier_pattern(source, pattern)
 
+    def extract_identifiers(
+        self, source: str, names: list[str]
+    ) -> dict[str, Optional[Identifier]]:
+        """Resolve many names against a single ast.parse() of source."""
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            return {name: None for name in names}
+
+        lines = source.splitlines(keepends=True)
+
+        # Top-level identifiers and a quick lookup of class nodes by name.
+        flat: dict[str, Identifier] = {}
+        class_nodes: dict[str, ast.ClassDef] = {}
+        for node in ast.iter_child_nodes(tree):
+            ident = self._node_to_identifier(node, None, lines)
+            if ident:
+                flat[ident.name] = ident
+            if isinstance(node, ast.ClassDef):
+                class_nodes.setdefault(node.name, node)
+
+        # Group dotted names by class so each class body is walked once even
+        # when many of its members are requested.
+        members_by_class: dict[str, list[str]] = {}
+        for name in names:
+            if "." in name and name not in flat:
+                class_name = name.split(".", 1)[0]
+                members_by_class.setdefault(class_name, []).append(name)
+
+        for class_name in members_by_class:
+            class_node = class_nodes.get(class_name)
+            if class_node is None:
+                continue
+            for member in class_node.body:
+                m_name = self._get_node_name(member)
+                if not m_name:
+                    continue
+                qn = f"{class_name}.{m_name}"
+                ident = self._node_to_identifier(member, None, lines, qualified_name=qn)
+                if ident:
+                    flat.setdefault(qn, ident)
+
+        return {name: flat.get(name) for name in names}
+
     def _node_to_identifier(
         self,
         node: ast.AST,

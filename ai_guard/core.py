@@ -131,6 +131,36 @@ def compute_identifier_hash(filepath: Path, identifier: str) -> Optional[str]:
     return compute_hash(ident.source)
 
 
+def compute_identifier_hashes(
+    filepath: Path, identifiers: list[str]
+) -> dict[str, Optional[str]]:
+    """Compute hashes for many identifiers in one file, parsing the file once.
+
+    Args:
+        filepath: Path to the file.
+        identifiers: Identifier names to hash.
+
+    Returns:
+        Dict mapping each requested name to its hash, or None when the name
+        is not present in the file. If no parser is registered for the file
+        extension, every name maps to None.
+    """
+    from ai_guard.parsers.base import get_parser_for_file
+
+    parser = get_parser_for_file(str(filepath))
+    if not parser:
+        return {name: None for name in identifiers}
+
+    source = filepath.read_text(encoding="utf-8")
+    # Dedupe before handing to the parser; redundant lookups are wasted work.
+    unique = list(dict.fromkeys(identifiers))
+    found = parser.extract_identifiers(source, unique)
+    return {
+        name: (compute_hash(ident.source) if ident else None)
+        for name, ident in found.items()
+    }
+
+
 class GuardFile:
     """Manages the .ai-guard file."""
 
@@ -341,8 +371,25 @@ class GuardFile:
         Returns:
             List of (entry, reason) tuples for entries that failed verification.
         """
-        failures = []
+        # Pre-compute identifier hashes in a single pass per file so a file
+        # with N guarded identifiers is parsed once rather than N times.
+        identifier_names_by_path: dict[str, list[str]] = {}
+        for entry in self.entries:
+            if entry.identifier and not entry.is_self_protection:
+                filepath = self.root / entry.path
+                if filepath.exists():
+                    identifier_names_by_path.setdefault(entry.path, []).append(
+                        entry.identifier
+                    )
 
+        identifier_hashes: dict[tuple[str, str], Optional[str]] = {}
+        for path, names in identifier_names_by_path.items():
+            filepath = self.root / path
+            hashes = compute_identifier_hashes(filepath, names)
+            for name, h in hashes.items():
+                identifier_hashes[(path, name)] = h
+
+        failures = []
         for entry in self.entries:
             filepath = self.root / entry.path
 
@@ -351,7 +398,7 @@ class GuardFile:
                 continue
 
             if entry.identifier:
-                current_hash = compute_identifier_hash(filepath, entry.identifier)
+                current_hash = identifier_hashes.get((entry.path, entry.identifier))
                 if current_hash is None:
                     failures.append((entry, "identifier not found"))
                 elif current_hash != entry.hash:
@@ -432,7 +479,22 @@ class GuardFile:
                 seen[key] = entry
             # Duplicates are fine — we'll recompute anyway
 
-        # Recompute hashes from working tree
+        # Batch identifier-hash recomputation by file so each source file is
+        # parsed once regardless of how many of its identifiers are guarded.
+        identifier_names_by_path: dict[str, list[str]] = {}
+        for (path, identifier), entry in seen.items():
+            if entry.is_self_protection or not identifier:
+                continue
+            filepath = self.root / path
+            if filepath.exists():
+                identifier_names_by_path.setdefault(path, []).append(identifier)
+
+        identifier_hashes: dict[tuple[str, str], Optional[str]] = {}
+        for path, names in identifier_names_by_path.items():
+            filepath = self.root / path
+            for name, h in compute_identifier_hashes(filepath, names).items():
+                identifier_hashes[(path, name)] = h
+
         resolved = []
         for (path, identifier), entry in seen.items():
             if entry.is_self_protection:
@@ -443,7 +505,7 @@ class GuardFile:
                 continue  # File gone — drop entry
 
             if identifier:
-                new_hash = compute_identifier_hash(filepath, identifier)
+                new_hash = identifier_hashes.get((path, identifier))
                 if new_hash is None:
                     continue  # Identifier gone — drop entry
                 resolved.append(ProtectedEntry(path=path, identifier=identifier, hash=new_hash))

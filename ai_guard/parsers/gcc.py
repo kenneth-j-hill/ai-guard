@@ -534,6 +534,31 @@ class GCCParserBase(Parser):
 
         return None
 
+    def extract_identifiers(
+        self, source: str, names: list[str]
+    ) -> dict[str, Optional[Identifier]]:
+        """Resolve many names against a single scan of source.
+
+        Top-level names are sourced from list_identifiers (one pass). :: names
+        are grouped by their struct/class prefix so each struct body is scanned
+        once even when many of its members are requested.
+        """
+        flat: dict[str, Identifier] = {
+            ident.name: ident for ident in self.list_identifiers(source)
+        }
+
+        struct_prefixes: dict[str, list[str]] = {}
+        for name in names:
+            if "::" in name and name not in flat:
+                prefix = name.split("::", 1)[0]
+                struct_prefixes.setdefault(prefix, []).append(name)
+
+        for prefix in struct_prefixes:
+            for m in self.list_struct_members(source, prefix):
+                flat.setdefault(m.name, m)
+
+        return {name: flat.get(name) for name in names}
+
     def _extract_struct_member(
         self, source: str, lines: list[str], qualified_name: str
     ) -> Optional[Identifier]:

@@ -99,6 +99,26 @@ class Parser(ABC):
         else:
             return [i for i in all_identifiers if i.name == pattern]
 
+    def extract_identifiers(
+        self, source: str, names: list[str]
+    ) -> dict[str, Optional[Identifier]]:
+        """Extract multiple identifiers from a single source string.
+
+        Bulk callers (e.g., ai-guard verify processing many entries per file)
+        use this to parse the source once and resolve many names against it.
+        The default loops `extract_identifier` per name; subclasses with
+        expensive parsing (tree-sitter, ast.parse) should override to parse
+        the source a single time.
+
+        Args:
+            source: The full source code of the file.
+            names: Identifier names to look up.
+
+        Returns:
+            Dict mapping each requested name to its Identifier (or None).
+        """
+        return {name: self.extract_identifier(source, name) for name in names}
+
 
 # Registry of file extensions to parser classes
 _PARSER_REGISTRY: dict[str, type[Parser]] = {}
