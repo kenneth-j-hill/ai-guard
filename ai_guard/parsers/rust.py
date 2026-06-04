@@ -278,5 +278,44 @@ class RustParser(Parser):
 
         return members
 
+    def extract_identifiers(
+        self, source: str, names: list[str]
+    ) -> dict[str, Optional[Identifier]]:
+        """Resolve many names against a single tree-sitter parse of source."""
+        _ensure_available()
+        source_bytes = source.encode("utf-8")
+        tree = _make_parser().parse(source_bytes)
+        root = tree.root_node
+
+        # Build a flat name→Identifier map covering top-level items and the
+        # items inside any mod blocks (using their qualified mod::name form).
+        # Preserve first-match semantics so a `struct Foo` followed by an
+        # `impl Foo` resolves to the struct, matching extract_identifier().
+        flat: dict[str, Identifier] = {}
+        for child in root.children:
+            if child.type not in _TOP_LEVEL_TYPES:
+                continue
+            node_name = _get_node_name(child)
+            if not node_name:
+                continue
+            flat.setdefault(node_name, self._node_to_identifier(child, source_bytes, node_name))
+            if child.type == "mod_item":
+                for m in self._list_mod_members(child, source_bytes, node_name):
+                    flat.setdefault(m.name, m)
+
+        # Group :: names by their type prefix so each type's member list is
+        # walked at most once even when many of its members are requested.
+        type_prefixes: dict[str, list[str]] = {}
+        for name in names:
+            if "::" in name and name not in flat:
+                prefix = name.split("::", 1)[0]
+                type_prefixes.setdefault(prefix, []).append(name)
+
+        for prefix in type_prefixes:
+            for m in self._list_members(root, source_bytes, prefix):
+                flat.setdefault(m.name, m)
+
+        return {name: flat.get(name) for name in names}
+
 
 register_parser([".rs"], RustParser)

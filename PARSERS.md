@@ -97,6 +97,20 @@ def expand_identifier_pattern(self, source: str, pattern: str) -> list[Identifie
 
 The default implementation handles wildcards (`*`, `?`) via fnmatch on the flat identifier list.
 
+### Optional: Batch Extraction
+
+`ai-guard verify` and `ai-guard resolve` look up many identifiers per file. The default implementation loops `extract_identifier` once per name, which means an expensive parse runs N times. If your parser builds an AST or otherwise pays a non-trivial per-source cost, override `extract_identifiers()` to parse the source once and resolve all names against it:
+
+```python
+def extract_identifiers(self, source: str, names: list[str]) -> dict[str, Optional[Identifier]]:
+    """Resolve many names against a single parse of source."""
+    tree = my_parse(source)  # pay this cost once
+    flat = {ident.name: ident for ident in self._walk(tree)}
+    return {name: flat.get(name) for name in names}
+```
+
+The contract: return a dict whose keys exactly match `names` (in order, if your callers rely on it), with each value being an `Identifier` or `None`. Results should be identical to calling `extract_identifier(source, name)` per name individually.
+
 ## Precedence
 
 External parsers do **not** override built-in parsers. If ai-guard already handles an extension (`.py`, `.c`, `.rs`, etc.), the built-in parser is used regardless of what `.ai-guard_parsers` says. This prevents accidental breakage.
