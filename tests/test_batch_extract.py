@@ -165,6 +165,111 @@ class TestParserInvokedOncePerFile:
             f"verify() parsed mod.py {parse_count['n']} times; expected exactly 1"
         )
 
+    @pytest.mark.skipif(not _RUST_AVAILABLE, reason="tree-sitter-rust not installed")
+    def test_update_all_parses_rust_file_once(self, monkeypatch, tmp_path):
+        (tmp_path / ".git" / "hooks").mkdir(parents=True)
+        rs_path = tmp_path / "lib.rs"
+        rs_path.write_text(SAMPLE_RS, encoding="utf-8")
+
+        guard = GuardFile(tmp_path)
+        guard.add_identifier("lib.rs", "alpha")
+        guard.add_identifier("lib.rs", "beta")
+        guard.add_identifier("lib.rs", "gamma")
+        guard.add_identifier("lib.rs", "Holder::method_a")
+        guard.add_identifier("lib.rs", "Holder::method_b")
+        guard.save()
+
+        parse_count = {"n": 0}
+        original_make_parser = _rust._make_parser
+
+        def counting_make_parser():
+            parse_count["n"] += 1
+            return original_make_parser()
+
+        monkeypatch.setattr(_rust, "_make_parser", counting_make_parser)
+
+        guard2 = GuardFile(tmp_path)
+        result = guard2.update_all(prune=False)
+        assert result.errors == []
+        assert parse_count["n"] == 1, (
+            f"update_all() parsed lib.rs {parse_count['n']} times; expected exactly 1"
+        )
+
+
+class TestUpdateAll:
+    """Batched update_all() semantics — must match the old per-entry loop."""
+
+    def _guard_with(self, tmp_path):
+        (tmp_path / ".git" / "hooks").mkdir(parents=True)
+        (tmp_path / "mod.py").write_text(SAMPLE_PY, encoding="utf-8")
+        guard = GuardFile(tmp_path)
+        for name in ["alpha", "beta", "Holder.method_a"]:
+            guard.add_identifier("mod.py", name)
+        guard.save()
+        return guard
+
+    def test_unchanged_source_reports_no_updates(self, tmp_path):
+        guard = self._guard_with(tmp_path)
+        guard2 = GuardFile(tmp_path)
+        result = guard2.update_all()
+        assert result.updated == []
+        assert result.unchanged_count == 3
+        assert result.errors == []
+        assert result.pruned == []
+
+    def test_modified_identifier_is_reported_updated(self, tmp_path):
+        guard = self._guard_with(tmp_path)
+        # Change alpha's body; its stored hash should now differ.
+        src = (tmp_path / "mod.py").read_text(encoding="utf-8")
+        src = src.replace("def alpha():\n    return 1", "def alpha():\n    return 999")
+        (tmp_path / "mod.py").write_text(src, encoding="utf-8")
+
+        guard2 = GuardFile(tmp_path)
+        result = guard2.update_all()
+        updated_names = {e.identifier for e in result.updated}
+        assert updated_names == {"alpha"}
+        assert result.unchanged_count == 2
+
+    def test_missing_identifier_errors_without_prune(self, tmp_path):
+        guard = self._guard_with(tmp_path)
+        # Remove beta from the source entirely.
+        src = (tmp_path / "mod.py").read_text(encoding="utf-8")
+        src = src.replace("def beta():\n    return 2\n", "")
+        (tmp_path / "mod.py").write_text(src, encoding="utf-8")
+
+        guard2 = GuardFile(tmp_path)
+        result = guard2.update_all(prune=False)
+        error_targets = {e.identifier for e, _ in result.errors}
+        assert "beta" in error_targets
+        # Stale entry is kept when not pruning.
+        assert any(e.identifier == "beta" for e in guard2.entries)
+
+    def test_missing_identifier_pruned_with_prune(self, tmp_path):
+        guard = self._guard_with(tmp_path)
+        src = (tmp_path / "mod.py").read_text(encoding="utf-8")
+        src = src.replace("def beta():\n    return 2\n", "")
+        (tmp_path / "mod.py").write_text(src, encoding="utf-8")
+
+        guard2 = GuardFile(tmp_path)
+        result = guard2.update_all(prune=True)
+        pruned_targets = {e.identifier for e, _ in result.pruned}
+        assert "beta" in pruned_targets
+        # Entry is gone after pruning.
+        assert not any(e.identifier == "beta" for e in guard2.entries)
+        # Survivors remain.
+        assert any(e.identifier == "alpha" for e in guard2.entries)
+
+    def test_missing_file_pruned_with_prune(self, tmp_path):
+        guard = self._guard_with(tmp_path)
+        (tmp_path / "mod.py").unlink()
+
+        guard2 = GuardFile(tmp_path)
+        result = guard2.update_all(prune=True)
+        reasons = {reason for _, reason in result.pruned}
+        assert "file not found" in reasons
+        # Only self-protection remains.
+        assert all(e.is_self_protection for e in guard2.entries)
+
 
 class TestComputeIdentifierHashes:
     """The bulk helper used by verify()/resolve()."""

@@ -247,50 +247,38 @@ def cmd_update(args: argparse.Namespace) -> int:
     any_error = False
 
     if args.all:
-        # Update all existing entries
+        # Update all existing entries. Batched so each source file is parsed
+        # once regardless of how many of its identifiers are guarded.
         existing_entries = guard.list_entries()
-        if not existing_entries:
+        if not existing_entries or all(e.is_self_protection for e in existing_entries):
             qprint("No protected entries to update")
             return 0
 
-        for entry in existing_entries:
-            # Skip self-protection entry - it's computed automatically
-            if entry.is_self_protection:
-                continue
+        try:
+            result = guard.update_all(prune=args.prune)
+        except ImportError as e:
+            # e.g. a guarded language's parser dependency isn't installed.
+            # update_all left .ai-guard untouched, so nothing to save.
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
 
-            old_hash = entry.hash
-            try:
-                updated = guard.update(entry.path, entry.identifier)
-                for upd in updated:
-                    if upd.hash != old_hash:
-                        qprint(f"Updated {format_entry(upd)}")
-                        pprint(entry_target(upd))
-                    any_success = True
-            except FileNotFoundError:
-                target = entry_target(entry)
-                if args.prune:
-                    guard.remove(entry.path, entry.identifier)
-                    qprint(f"Pruned {target} (file not found)")
-                    pprint(entry_target(entry))
-                    any_success = True
-                else:
-                    print(f"Error: File not found: {target}", file=sys.stderr)
-                    print(f"  Run 'ai-guard remove {target}' to remove this entry.", file=sys.stderr)
-                    any_error = True
-            except ImportError as e:
-                print(f"Error: {e}", file=sys.stderr)
-                any_error = True
-            except ValueError:
-                target = entry_target(entry)
-                if args.prune:
-                    guard.remove(entry.path, entry.identifier)
-                    qprint(f"Pruned {target} (identifier not found)")
-                    pprint(entry_target(entry))
-                    any_success = True
-                else:
-                    print(f"Error: Identifier not found: {target}", file=sys.stderr)
-                    print(f"  Run 'ai-guard remove {target}' to remove this entry.", file=sys.stderr)
-                    any_error = True
+        for upd in result.updated:
+            qprint(f"Updated {format_entry(upd)}")
+            pprint(entry_target(upd))
+
+        for entry, reason in result.pruned:
+            target = entry_target(entry)
+            qprint(f"Pruned {target} ({reason})")
+            pprint(target)
+
+        for entry, reason in result.errors:
+            target = entry_target(entry)
+            label = "File not found" if reason == "file not found" else "Identifier not found"
+            print(f"Error: {label}: {target}", file=sys.stderr)
+            print(f"  Run 'ai-guard remove {target}' to remove this entry.", file=sys.stderr)
+
+        any_success = bool(result.updated) or bool(result.pruned) or result.unchanged_count > 0
+        any_error = bool(result.errors)
     else:
         for target in args.targets:
             for path, identifier in expand_glob_target(root, target):
