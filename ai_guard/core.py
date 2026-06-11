@@ -12,6 +12,24 @@ _CONFLICT_MARKER_RE = re.compile(r'^(<{7}|={7}|>{7}|\|{7})\s', re.MULTILINE)
 
 
 @dataclass
+class UpdateAllResult:
+    """Outcome of GuardFile.update_all(), for the CLI to report.
+
+    - updated: entries whose hash actually changed
+    - unchanged_count: entries refreshed but whose hash was identical
+    - pruned: (entry, reason) dropped because file/identifier no longer exists
+      (only when prune=True)
+    - errors: (entry, reason) for missing file/identifier when prune=False;
+      the stale entry is left in place
+    """
+
+    updated: list["ProtectedEntry"]
+    unchanged_count: int
+    pruned: list[tuple["ProtectedEntry", str]]
+    errors: list[tuple["ProtectedEntry", str]]
+
+
+@dataclass
 class ProtectedEntry:
     """A protected file or identifier entry."""
 
@@ -343,6 +361,94 @@ class GuardFile:
             self.entries = [e for e in self.entries if e.path != normalized or e.identifier]
             added, _ = self.add_file(path)
             return [added]
+
+    def update_all(self, prune: bool = False) -> UpdateAllResult:
+        """Recompute hashes for every entry, parsing each file at most once.
+
+        This is the batched equivalent of looping update() over every entry.
+        Each source file is read and parsed a single time regardless of how
+        many of its identifiers are guarded.
+
+        Args:
+            prune: When True, drop entries whose file or identifier no longer
+                exists. When False, such entries are reported as errors and
+                left unchanged.
+
+        Returns:
+            An UpdateAllResult describing what changed. self.entries is mutated
+            in place; the caller is responsible for calling save().
+        """
+        # Bucket identifier entries by file so each file is parsed once. Files
+        # that don't exist are handled separately (file-not-found), without an
+        # attempted read.
+        identifier_names_by_path: dict[str, list[str]] = {}
+        for entry in self.entries:
+            if entry.is_self_protection or not entry.identifier:
+                continue
+            filepath = self.root / entry.path
+            if filepath.exists():
+                identifier_names_by_path.setdefault(entry.path, []).append(
+                    entry.identifier
+                )
+
+        identifier_hashes: dict[tuple[str, str], Optional[str]] = {}
+        for path, names in identifier_names_by_path.items():
+            filepath = self.root / path
+            for name, h in compute_identifier_hashes(filepath, names).items():
+                identifier_hashes[(path, name)] = h
+
+        updated: list[ProtectedEntry] = []
+        unchanged_count = 0
+        pruned: list[tuple[ProtectedEntry, str]] = []
+        errors: list[tuple[ProtectedEntry, str]] = []
+        new_entries: list[ProtectedEntry] = []
+
+        for entry in self.entries:
+            # Self-protection is recomputed by save(); carry it through.
+            if entry.is_self_protection:
+                new_entries.append(entry)
+                continue
+
+            filepath = self.root / entry.path
+
+            if not filepath.exists():
+                reason = "file not found"
+                if prune:
+                    pruned.append((entry, reason))
+                else:
+                    errors.append((entry, reason))
+                    new_entries.append(entry)
+                continue
+
+            if entry.identifier:
+                new_hash = identifier_hashes.get((entry.path, entry.identifier))
+                if new_hash is None:
+                    reason = "identifier not found"
+                    if prune:
+                        pruned.append((entry, reason))
+                    else:
+                        errors.append((entry, reason))
+                        new_entries.append(entry)
+                    continue
+            else:
+                new_hash = compute_file_hash(filepath)
+
+            refreshed = ProtectedEntry(
+                path=entry.path, identifier=entry.identifier, hash=new_hash
+            )
+            new_entries.append(refreshed)
+            if new_hash != entry.hash:
+                updated.append(refreshed)
+            else:
+                unchanged_count += 1
+
+        self.entries = new_entries
+        return UpdateAllResult(
+            updated=updated,
+            unchanged_count=unchanged_count,
+            pruned=pruned,
+            errors=errors,
+        )
 
     def remove(self, path: str, identifier: Optional[str] = None) -> list[ProtectedEntry]:
         """Remove protection for a file or identifier.

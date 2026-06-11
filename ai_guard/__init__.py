@@ -1,3 +1,3 @@
 """ai-guard: Protect code from incidental modifications by an AI."""
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
